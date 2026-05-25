@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Membrane Integration - Interaction Test</title>
+    <link rel="stylesheet" href="./style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.js"></script>
+</head>
+<body>
+    <button id="connect-btn">Arduino Connect</button>
+
+    <script>
+        // --- 하드웨어 및 데이터 통신 변수 ---
+        let port;
+        let reader;
+        let distance = 200;  
+        let pulseValue = 0;  
+
+        // --- 매핑을 위한 오프스크린 버퍼 (가상 도화지) ---
+        let pg; 
+        let cellParticles = []; // 세포막 주변 물질 입자 배열
+
+        // --- 코너 핀 매핑용 네 모서리 좌표 변수 ---
+        // [좌상, 우상, 우하, 좌하] 순서
+        let corners = [];
+        let selectedCorner = -1;
+        let isMappingMode = true; // 'm' 키를 누르면 매핑 가이드 점들을 숨기거나 보여줍니다.
+
+        function setup() {
+            // 코너 핀 연산을 정확하게 하기 위해 WEBGL 3D 모드로 캔버스 생성
+            createCanvas(windowWidth, windowHeight, WEBGL);
+            
+            // 1. 실제로 세포막 그래픽이 그려질 가상의 도화지 생성 (세로형 해상도 비율 설정)
+            // 프리스타일로 투사할 천의 대략적인 비율에 맞춰 600 x 1000으로 설정
+            pg = createGraphics(600, 1000);
+
+            // 2. 초기 매핑 코너 핀 위치 설정 (화면 중앙 부근에 사각형으로 배치)
+            corners = [
+                createVector(-200, -350), // 좌상 (Top-Left)
+                createVector(200, -350),  // 우상 (Top-Right)
+                createVector(200, 350),   // 우하 (Bottom-Right)
+                createVector(-200, 350)   // 좌하 (Bottom-Left)
+            ];
+
+            // 웹 시리얼 연결 버튼 이벤트 바인딩
+            document.getElementById('connect-btn').addEventListener('click', connectSerial);
+        }
+
+        function draw() {
+            // -------------------------------------------------------------
+            // [STEP 1] 가상 도화지(pg)에 승민 님의 세포막 그래픽 그리기
+            // -------------------------------------------------------------
+            pg.background(18, 18, 18); // 암전 배경
+
+            let centerX = pg.width / 2;
+
+            // 1-1. 거리(distance)에 따른 입자(물질) 생성 로직
+            // 거리가 가까워질수록 타겟 입자 수를 늘림
+            let targetParticleCount = map(distance, 10, 150, 200, 0); 
+            targetParticleCount = constrain(targetParticleCount, 0, 300);
+
+            // 입자 개수 조절
+            while (cellParticles.length < targetParticleCount) {
+                cellParticles.push({
+                    x: random(0, pg.width),
+                    y: random(0, pg.height),
+                    speedX: random(-1, 1),
+                    speedY: random(-1, 1),
+                    size: random(3, 7)
+                });
+            }
+            if (cellParticles.length > targetParticleCount) {
+                cellParticles.splice(0, cellParticles.length - targetParticleCount);
+            }
+
+            // 1-2. 기저 조형: 인지질 이중층 및 통로 단백질 기하학 구조 그리기
+            pg.noFill();
+            pg.stroke(139, 94, 60, 200); // 러스틱 브라운 (#8B5E3C)
+            pg.strokeWeight(4);
+            
+            // 중앙 세포막의 통로 구조 (단순 직선이 아닌 중간에 홈이 파인 구조 유도)
+            pg.beginShape();
+            for (let y = 0; y <= pg.height; y += 20) {
+                let xOffset = 0;
+                // 임계점(50cm) 이내로 들어오면 통로 주변에 긴장감으로 미세하게 떨림 유도
+                if (distance < 50) {
+                    xOffset = sin(y * 0.05 + frameCount * 0.2) * 3;
+                }
+                pg.vertex(centerX + xOffset, y);
+            }
+            pg.endShape();
+
+            // 1-3. 생성된 물질 입자들 양옆에 뿌리기 (소프트 앰버 #E2B07E)
+            pg.noStroke();
+            pg.fill(226, 176, 126, 220); 
+            for (let p of cellParticles) {
+                // 입자들 미세하게 이동
+                p.x += p.speedX;
+                p.y += p.speedY;
+
+                // 벽면 튕기기 및 세포막 경계 바운스
+                if (p.x < 0 || p.x > pg.width) p.speedX *= -1;
+                if (p.y < 0 || p.y > pg.height) p.speedY *= -1;
+
+                // 임계점(50cm) 이내면 입자들이 중앙 통로 근처로 강제로 끌려가며 포화되도록 연출
+                if (distance < 50) {
+                    p.x = lerp(p.x, centerX + random(-40, 40), 0.02);
+                }
+
+                pg.ellipse(p.x, p.y, p.size);
+            }
+
+            // -------------------------------------------------------------
+            // [STEP 2] 메인 3D 화면에 가상 도화지를 텍스처로 맵핑하여 출력
+            // -------------------------------------------------------------
+            background(0); // 실제 프로젝터 밖 여백은 완전한 리얼 블랙 처리
+
+            // WEBGL 모드에서는 중심이 (0,0)이므로 텍스처 좌표 매핑 연산 진행
+            noStroke();
+            texture(pg); // 방금 그린 세포막 도화지를 질감(Texture)으로 사용
+            
+            // 네 꼭짓점 가이드에 맞게 그래픽을 강제로 늘려서 그리기 (Warping)
+            beginShape(QUADS);
+            textureMode(NORMAL);
+            vertex(corners[0].x, corners[0].y, 0, 0, 0); // 좌상
+            vertex(corners[1].x, corners[1].y, 0, 1, 0); // 우상
+            vertex(corners[2].x, corners[2].y, 0, 1, 1); // 우하
+            vertex(corners[3].x, corners[3].y, 0, 0, 1); // 좌하
+            endShape();
+
+            // -------------------------------------------------------------
+            // [STEP 3] 맵핑 모드일 때 마우스로 조절할 수 있는 코너 핀 가이드라인 그리기
+            // -------------------------------------------------------------
+            if (isMappingMode) {
+                stroke(0, 255, 0); // 가이드는 형광 초록색 선으로 명시
+                strokeWeight(1);
+                noFill();
+                beginShape();
+                vertex(corners[0].x, corners[0].y);
+                vertex(corners[1].x, corners[1].y);
+                vertex(corners[2].x, corners[2].y);
+                vertex(corners[3].x, corners[3].y);
+                endShape(CLOSE);
+
+                // 꼭짓점에 마우스로 잡을 수 있는 원형 핀 그리기
+                for (let i = 0; i < 4; i++) {
+                    fill(0, 255, 0);
+                    ellipse(corners[i].x, corners[i].y, 15, 15);
+                }
+            }
+        }
+
+        // --- 마우스 인터랙션을 통한 코너 핀 조정 로직 ---
+        function mousePressed() {
+            if (!isMappingMode) return;
+            
+            // WEBGL 모드이므로 마우스 좌표를 중심 기준으로 보정
+            let mx = mouseX - width / 2;
+            let my = mouseY - height / 2;
+
+            // 어떤 꼭짓점을 클릭했는지 탐색
+            for (let i = 0; i < 4; i++) {
+                let d = dist(mx, my, corners[i].x, corners[i].y);
+                if (d < 20) { // 20픽셀 이내 반경 클릭 시 선택
+                    selectedCorner = i;
+                    break;
+                }
+            }
+        }
+
+        function mouseDragged() {
+            if (selectedCorner !== -1) {
+                // 드래그하는 대로 코너 핀 위치 이동 가능
+                corners[selectedCorner].x = mouseX - width / 2;
+                corners[selectedCorner].y = mouseY - height / 2;
+            }
+        }
+
+        function mouseReleased() {
+            selectedCorner = -1;
+        }
+
+        // --- 키보드 'm' 키를 누르면 매핑 가이드라인을 끄고 켤 수 있음 ---
+        function keyPressed() {
+            if (key === 'm' || key === 'M') {
+                isMappingMode = !isMappingMode; // Toggle 가이드라인
+            }
+        }
+
+        // 브라우저 리사이즈 대응
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+
+        // --- Web Serial API 아두이노 데이터 수신 로직 (동일) ---
+        async function connectSerial() {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 9600 });
+                document.getElementById('connect-btn').style.display = 'none';
+                
+                const textDecoder = new TextDecoderStream();
+                const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+                const inputStream = textDecoder.readable;
+                reader = inputStream.getReader();
+
+                let buffer = "";
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    if (value) {
+                        buffer += value;
+                        let lines = buffer.split("\n");
+                        buffer = lines.pop(); 
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (line.length > 0) {
+                                let data = line.split(" ");
+                                if (data.length === 2) {
+                                    distance = Number(data[0]);
+                                    pulseValue = Number(data[1]);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("시리얼 연결 실패:", error);
+            }
+        }
+    </script>
+</body>
+</html>
