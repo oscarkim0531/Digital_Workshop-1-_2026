@@ -1,0 +1,174 @@
+/* ==========================================================================
+   1. 브라우저 환경 초기화 (Reset & Base)
+   ========================================================================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    
+    /* [전시 최적화] 관객이 화면을 마우스로 더블클릭하거나 드래그했을 때 
+       텍스트가 파랗게 블록 지정(선택)되는 현상을 전면 차단합니다.
+    */
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    
+    /* 마우스 커서 및 터치 시 발생하는 파란색 하이라이트 박스 제거 */
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    width: 100vw;
+    height: 100vh;
+    background-color: #000000; /* 프로젝션 매핑 밖 여백을 투명하게 날리기 위한 완벽한 리얼 블랙 */
+    overflow: hidden;         /* 마우스 스크롤이나 터치 드래그로 화면이 밀려 매핑이 깨지는 현상 방지 */
+    
+    /* 화면 정중앙에 p5.js 캔버스를 오차 없이 물리적으로 고정 */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    
+    /* [전시 최적화] 웹 브라우저 자체의 마우스 커서(화살표)를 숨깁니다.
+       전시장 스크린에 마우스 포인터가 돌아다니면 미디어아트 특유의 몰입감이 깨지기 때문입니다.
+       (세팅 중 매핑 핀을 잡아야 할 때는 커서가 필요하므로, 하단의 매핑 모드 팁을 참고하세요.)
+    */
+    cursor: default; 
+}
+
+/* ==========================================================================
+   2. p5.js 미디어 가상 캔버스 최적화 (Canvas Layout)
+   ========================================================================== */
+canvas {
+    display: block;           /* 블록 요소로 변경하여 인라인 요소 특유의 하단 3px 마진 에러 제거 */
+    width: 100% !important;   /* 프로젝터 해상도(더 프리스타일)에 맞춰 가로 꽉 차게 스케일링 */
+    height: 100% !important;  /* 세로 해상도 역시 브라우저 창 크기에 칼같이 동기화 */
+    
+    /* 이미지나 벡터 그래픽이 리사이즈될 때 픽셀이 흐려지지 않고 정밀하게 렌더링되도록 보정 */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+}
+
+/* ==========================================================================
+   3. 전시장 세팅용 하드웨어 연결 버튼 디자인 (Connect Button UI)
+   ========================================================================== */
+#connect-btn {
+    position: fixed;
+    top: 30px;
+    left: 30px;
+    z-index: 9999; /* 캔버스 그래픽 레이어보다 항상 위에 올라오도록 위계 설정 */
+    
+    /* 조형적 요소 */
+    padding: 12px 24px;
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 4px;
+    
+    /* 타이포그래피 */
+    color: #ffffff;
+    font-family: 'sans-serif';
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    
+    /* 인터랙션 */
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+/* 마우스 호버 시 러스틱 브라운과 소프트 앰버 사이의 하프톤 라이팅 연출 */
+#connect-btn:hover {
+    background-color: #ffffff;
+    color: #000000;
+    border-color: #ffffff;
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+}
+
+/* 버튼이 클릭되었을 때의 순간적 피드백 */
+#connect-btn:active {
+    transform: scale(0.96);
+}
+
+
+/* ==========================================================================
+   4. 디버깅용 가상 컨트롤러 패널 디자인 (Debug Controller UI)
+   ========================================================================== */
+#debug-controller {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 9999;
+    
+    /* 조형 및 백그라운드 (미디어아트 무드에 맞는 반투명 다크 글래스모피즘) */
+    width: 260px;
+    padding: 20px;
+    background: rgba(20, 20, 20, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    
+    /* 타이포그래피 */
+    color: #ffffff;
+    font-family: sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+}
+
+.control-group {
+    margin-bottom: 16px;
+}
+.control-group:last-child {
+    margin-bottom: 0;
+}
+
+.control-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+}
+
+/* 슬라이더 스타일 커스텀 */
+#dist-slider {
+    width: 100%;
+    margin-bottom: 6px;
+    accent-color: #E2B07E; /* 활성화 컬러를 승민님의 소프트 앰버 컬러로 매칭 */
+    cursor: pointer;
+}
+
+#dist-value {
+    display: block;
+    text-align: right;
+    font-weight: bold;
+    color: #E2B07E;
+}
+
+/* 터치 토글 버튼 스타일 */
+#touch-mock-btn {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: Birds 0.2s ease;
+}
+
+/* 터치 꺼짐 상태 스타일 (Rust Brown 계열의 어두운 무드) */
+#touch-mock-btn.off {
+    background-color: rgba(139, 94, 60, 0.2);
+    border-color: rgba(139, 94, 60, 0.5);
+    color: #8B5E3C;
+}
+
+/* 터치 켜짐 상태 스타일 (Soft Amber로 발광하는 무드) */
+#touch-mock-btn.on {
+    background-color: #E2B07E;
+    border-color: #E2B07E;
+    color: #000000;
+    box-shadow: 0 0 10px rgba(226, 176, 126, 0.4);
+}

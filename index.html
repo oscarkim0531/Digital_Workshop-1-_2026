@@ -3,138 +3,267 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Membrane Integration - Interaction Test</title>
+    <title>Membrane Project - Mapping System Base</title>
     <link rel="stylesheet" href="./style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.js"></script>
 </head>
 <body>
-    <button id="connect-btn">Arduino Connect</button>
+
+    <button id="connect-btn">Connect System</button>
+
+    <div id="debug-controller">
+        <div class="control-group">
+            <label for="dist-slider">가상 거리 제어 (cm)</label>
+            <input type="range" id="dist-slider" min="0" max="200" value="200">
+            <span id="dist-value">200 cm</span>
+        </div>
+        
+        <div class="control-group">
+            <label>정전식 터치 시뮬레이션</label>
+            <button id="touch-mock-btn" class="off">TOUCH OFF</button>
+        </div>
+    </div>
 
     <script>
-        // --- 하드웨어 및 데이터 통신 변수 ---
-        let port;
-        let reader;
-        let distance = 200;  
-        let pulseValue = 0;  
+        // --- 매핑 시스템 제어를 위한 전역 변수 ---
+        let pg;               
+        let corners = [];     
+        let selectedCorner = -1; 
+        let isMappingMode = true; 
 
-        // --- 매핑을 위한 오프스크린 버퍼 (가상 도화지) ---
-        let pg; 
-        let cellParticles = []; // 세포막 주변 물질 입자 배열
+        // 하드웨어 조정용 변수 기본 세팅 (현장 튜닝 가능)
+        const START_DISTANCE = 150;     // 관객 감지 시작 거리 (150cm)
+        const THRESHOLD_DISTANCE = 50;  // 세포막 등장 및 포화 시작 임계점 (50cm)
+        const MAX_CLOSE_DISTANCE = 15;   // 최종 밀착 최단 거리 (15cm)
+        const TOUCH_HOLD_TIME = 5000;    // 통로 완전 개방까지 필요한 시간 (5초)
 
-        // --- 코너 핀 매핑용 네 모서리 좌표 변수 ---
-        // [좌상, 우상, 우하, 좌하] 순서
-        let corners = [];
-        let selectedCorner = -1;
-        let isMappingMode = true; // 'm' 키를 누르면 매핑 가이드 점들을 숨기거나 보여줍니다.
+        // 디자인 에셋 변수
+        let colorA = '#8B5E3C';          // 관객 A의 입자 색상 (러스틱 브라운 - 우측 진영)
+        let colorB = '#E2B07E';          // 관객 B의 입자 색상 (소프트 앰버 - 좌측 진영)
+
+        // 하드웨어 입력값 시뮬레이션용 실시간 변수
+        let currentDistA = 200;  
+        let currentDistB = 200;  
+        let isTouchA = false;    
+        let isTouchB = false;    
+
+        // 시스템 상태 및 타이머 제어 변수
+        let currentPhase = 1;    // 1: 대기, 2: 진입 및 안내, 3: 임계점 포화, 4: 터치 확산
+        let touchStartTime = 0;  
+        let isTouchTriggered = false; 
+
+        // 그래픽 에셋 데이터 구조
+        let particles = [];      
 
         function setup() {
-            // 코너 핀 연산을 정확하게 하기 위해 WEBGL 3D 모드로 캔버스 생성
             createCanvas(windowWidth, windowHeight, WEBGL);
-            
-            // 1. 실제로 세포막 그래픽이 그려질 가상의 도화지 생성 (세로형 해상도 비율 설정)
-            // 프리스타일로 투사할 천의 대략적인 비율에 맞춰 600 x 1000으로 설정
             pg = createGraphics(600, 1000);
 
-            // 2. 초기 매핑 코너 핀 위치 설정 (화면 중앙 부근에 사각형으로 배치)
+            pg.textAlign(CENTER, CENTER);
+            pg.textFont('sans-serif');
+
             corners = [
-                createVector(-200, -350), // 좌상 (Top-Left)
-                createVector(200, -350),  // 우상 (Top-Right)
-                createVector(200, 350),   // 우하 (Bottom-Right)
-                createVector(-200, 350)   // 좌하 (Bottom-Left)
+                createVector(-200, -350), 
+                createVector(200, -350),  
+                createVector(200, 350),   
+                createVector(-200, 350)   
             ];
 
-            // 웹 시리얼 연결 버튼 이벤트 바인딩
             document.getElementById('connect-btn').addEventListener('click', connectSerial);
+
+            const distSlider = document.getElementById('dist-slider');
+            const distValueText = document.getElementById('dist-value');
+            const touchBtn = document.getElementById('touch-mock-btn');
+
+            distSlider.addEventListener('input', (e) => {
+                let val = Number(e.target.value);
+                distValueText.innerText = val + " cm";
+                currentDistA = val;
+                currentDistB = val;
+            });
+
+            touchBtn.addEventListener('click', () => {
+                if (!isTouchA || !isTouchB) {
+                    isTouchA = true;
+                    isTouchB = true;
+                    touchBtn.innerText = "TOUCH ON";
+                    touchBtn.className = "on";
+                } else {
+                    isTouchA = false;
+                    isTouchB = false;
+                    touchBtn.innerText = "TOUCH OFF";
+                    touchBtn.className = "off";
+                }
+            });
         }
 
         function draw() {
             // -------------------------------------------------------------
-            // [STEP 1] 가상 도화지(pg)에 승민 님의 세포막 그래픽 그리기
+            // [STEP 1] 가상 도화지(pg) 채우기 (M키 연동 배경 보정)
             // -------------------------------------------------------------
-            pg.background(18, 18, 18); // 암전 배경
-
-            let centerX = pg.width / 2;
-
-            // 1-1. 거리(distance)에 따른 입자(물질) 생성 로직
-            // 거리가 가까워질수록 타겟 입자 수를 늘림
-            let targetParticleCount = map(distance, 10, 150, 200, 0); 
-            targetParticleCount = constrain(targetParticleCount, 0, 300);
-
-            // 입자 개수 조절
-            while (cellParticles.length < targetParticleCount) {
-                cellParticles.push({
-                    x: random(0, pg.width),
-                    y: random(0, pg.height),
-                    speedX: random(-1, 1),
-                    speedY: random(-1, 1),
-                    size: random(3, 7)
-                });
-            }
-            if (cellParticles.length > targetParticleCount) {
-                cellParticles.splice(0, cellParticles.length - targetParticleCount);
+            if (isMappingMode) {
+                pg.background(40); 
+                pg.stroke(255, 30);
+                pg.strokeWeight(1);
+                pg.line(0, 0, pg.width, pg.height);
+                pg.line(pg.width, 0, 0, pg.height);
+            } else {
+                pg.background(0); 
             }
 
-            // 1-2. 기저 조형: 인지질 이중층 및 통로 단백질 기하학 구조 그리기
-            pg.noFill();
-            pg.stroke(139, 94, 60, 200); // 러스틱 브라운 (#8B5E3C)
-            pg.strokeWeight(4);
-            
-            // 중앙 세포막의 통로 구조 (단순 직선이 아닌 중간에 홈이 파인 구조 유도)
-            pg.beginShape();
-            for (let y = 0; y <= pg.height; y += 20) {
-                let xOffset = 0;
-                // 임계점(50cm) 이내로 들어오면 통로 주변에 긴장감으로 미세하게 떨림 유도
-                if (distance < 50) {
-                    xOffset = sin(y * 0.05 + frameCount * 0.2) * 3;
+            // -------------------------------------------------------------
+            // [실시간 페이즈(Phase) 판별 인터랙션 구조]
+            // -------------------------------------------------------------
+            if (isTouchA && isTouchB) {
+                if (!isTouchTriggered) {
+                    touchStartTime = millis(); 
+                    isTouchTriggered = true;
                 }
-                pg.vertex(centerX + xOffset, y);
+                currentPhase = 4; 
+            } else {
+                isTouchTriggered = false; 
+                if (currentDistA <= THRESHOLD_DISTANCE && currentDistB <= THRESHOLD_DISTANCE) {
+                    currentPhase = 3; 
+                } else if (currentDistA <= START_DISTANCE && currentDistB <= START_DISTANCE) {
+                    currentPhase = 2; 
+                } else {
+                    currentPhase = 1; 
+                }
             }
-            pg.endShape();
 
-            // 1-3. 생성된 물질 입자들 양옆에 뿌리기 (소프트 앰버 #E2B07E)
-            pg.noStroke();
-            pg.fill(226, 176, 126, 220); 
-            for (let p of cellParticles) {
-                // 입자들 미세하게 이동
-                p.x += p.speedX;
-                p.y += p.speedY;
+            // -------------------------------------------------------------
+            // [비주얼 연출 파트 1: 텍스트 레이어 가이드 위계화]
+            // -------------------------------------------------------------
+            if (currentPhase === 1) {
+                let textA = (currentDistA <= START_DISTANCE) ? "READY" : "바닥의 표시까지 가까이 와주세요.";
+                let textB = (currentDistB <= START_DISTANCE) ? "READY" : "바닥의 표시까지 가까이 와주세요.";
 
-                // 벽면 튕기기 및 세포막 경계 바운스
-                if (p.x < 0 || p.x > pg.width) p.speedX *= -1;
-                if (p.y < 0 || p.y > pg.height) p.speedY *= -1;
+                // 관객 B 방향 텍스트 (상단)
+                pg.push();
+                pg.translate(pg.width / 2, pg.height * 0.45); 
+                pg.fill(255);
+                pg.noStroke();
+                pg.textSize(22);
+                pg.text(textB, 0, 0);
+                pg.pop();
 
-                // 임계점(50cm) 이내면 입자들이 중앙 통로 근처로 강제로 끌려가며 포화되도록 연출
-                if (distance < 50) {
-                    p.x = lerp(p.x, centerX + random(-40, 40), 0.02);
+                // 관객 A 방향 텍스트 (하단 Y축 대칭 반전)
+                pg.push();
+                pg.translate(pg.width / 2, pg.height * 0.55); 
+                pg.scale(-1, 1); 
+                pg.fill(255);
+                pg.noStroke();
+                pg.textSize(22);
+                pg.text(textA, 0, 0);
+                pg.pop();
+            } 
+            else if (currentPhase === 2) {
+                let avgDist = (currentDistA + currentDistB) / 2;
+                if (avgDist > 100) {
+                    pg.push();
+                    pg.fill(255);
+                    pg.noStroke();
+                    pg.textSize(22);
+                    
+                    pg.push();
+                    pg.translate(pg.width / 2, pg.height * 0.25);
+                    pg.text("천천히 가까이 오세요.", 0, 0);
+                    pg.pop();
+                    
+                    pg.push();
+                    pg.translate(pg.width / 2, pg.height * 0.75);
+                    pg.scale(-1, 1);
+                    pg.text("천천히 가까이 오세요.", 0, 0);
+                    pg.pop();
+                    
+                    pg.pop();
+                }
+            }
+
+            // -------------------------------------------------------------
+            // [비주얼 연출 파트 2: 세로형 인지질 이중층 및 단백질 통로 구현]
+            // -------------------------------------------------------------
+            if (currentPhase >= 2) {
+                pg.push();
+                let membraneAlpha = (currentPhase === 2) ? 120 : 255; 
+                let centerX = pg.width / 2;
+
+                // 세로형 인지질 이중층 머리와 꼬리 그리기 (높은 조형 완결성)
+                pg.stroke(139, 94, 60, membraneAlpha); // Rustic Brown
+                pg.strokeWeight(3);
+                
+                for (let y = 0; y <= pg.height; y += 15) {
+                    // 통로 단백질이 들어갈 상단(190~310)과 하단(590~710) 구간은 조형을 비워둠
+                    if ((y > 190 && y < 310) || (y > 590 && y < 710)) continue;
+
+                    let yOffset = sin(y * 0.05 + frameCount * 0.03) * 3;
+
+                    // 왼쪽 막 라인 (머리와 중심을 향한 꼬리)
+                    pg.fill(40, membraneAlpha);
+                    pg.ellipse(centerX - 15 + yOffset, y, 10, 10);
+                    pg.line(centerX - 15 + yOffset, y, centerX - 2 + yOffset, y);
+
+                    // 오른쪽 막 라인
+                    pg.fill(40, membraneAlpha);
+                    pg.ellipse(centerX + 15 + yOffset, y, 10, 10);
+                    pg.line(centerX + 15 + yOffset, y, centerX + 2 + yOffset, y);
                 }
 
-                pg.ellipse(p.x, p.y, p.size);
+                // 단백질 통로 2개를 정확히 세로 중심축 상단(250)과 하단(650)에 안착
+                drawChannelProtein(centerX, 250, currentPhase); 
+                drawChannelProtein(centerX, 650, currentPhase); 
+                pg.pop();
             }
 
             // -------------------------------------------------------------
-            // [STEP 2] 메인 3D 화면에 가상 도화지를 텍스처로 맵핑하여 출력
+            // [비주얼 연출 파트 3: 가리비형 반원 세포 입자 시뮬레이션]
             // -------------------------------------------------------------
-            background(0); // 실제 프로젝터 밖 여백은 완전한 리얼 블랙 처리
+            if (currentPhase >= 2) {
+                let avgDist = (currentDistA + currentDistB) / 2;
+                let targetCount = map(avgDist, THRESHOLD_DISTANCE, START_DISTANCE, 250, 20);
+                targetCount = constrain(targetCount, 20, 300);
 
-            // WEBGL 모드에서는 중심이 (0,0)이므로 텍스처 좌표 매핑 연산 진행
+                // 부족한 입자 생성 (좌측 가장자리와 우측 가장자리에서 유입)
+                while (particles.length < targetCount) {
+                    let isLeft = random() > 0.5;
+                    particles.push(new ScallopCell(
+                        isLeft ? random(0, 40) : random(pg.width - 40, pg.width), 
+                        random(0, pg.height),
+                        isLeft ? 'B' : 'A' // B는 소프트 앰버(좌측 진영), A는 러스틱 브라운(우측 진영)
+                    ));
+                }
+
+                if (particles.length > targetCount && currentPhase === 2) {
+                    particles.splice(0, particles.length - targetCount);
+                }
+
+                for (let p of particles) {
+                    p.update(currentPhase);
+                    p.display();
+                }
+            }
+
+            // -------------------------------------------------------------
+            // [STEP 2] 메인 화면에 가상 도화지를 텍스처로 매핑하여 왜곡 투사
+            // -------------------------------------------------------------
+            background(0); 
             noStroke();
-            texture(pg); // 방금 그린 세포막 도화지를 질감(Texture)으로 사용
+            texture(pg); 
             
-            // 네 꼭짓점 가이드에 맞게 그래픽을 강제로 늘려서 그리기 (Warping)
             beginShape(QUADS);
             textureMode(NORMAL);
-            vertex(corners[0].x, corners[0].y, 0, 0, 0); // 좌상
-            vertex(corners[1].x, corners[1].y, 0, 1, 0); // 우상
-            vertex(corners[2].x, corners[2].y, 0, 1, 1); // 우하
-            vertex(corners[3].x, corners[3].y, 0, 0, 1); // 좌하
+            vertex(corners[0].x, corners[0].y, 0, 0, 0); 
+            vertex(corners[1].x, corners[1].y, 0, 1, 0); 
+            vertex(corners[2].x, corners[2].y, 0, 1, 1); 
+            vertex(corners[3].x, corners[3].y, 0, 0, 1); 
             endShape();
 
             // -------------------------------------------------------------
-            // [STEP 3] 맵핑 모드일 때 마우스로 조절할 수 있는 코너 핀 가이드라인 그리기
+            // [STEP 3] 매핑 세팅 모드일 때 시각 가이드라인 및 조절 핀 연출
             // -------------------------------------------------------------
             if (isMappingMode) {
-                stroke(0, 255, 0); // 가이드는 형광 초록색 선으로 명시
-                strokeWeight(1);
+                stroke(0, 255, 0);
+                strokeWeight(1.5);
                 noFill();
                 beginShape();
                 vertex(corners[0].x, corners[0].y);
@@ -143,26 +272,62 @@
                 vertex(corners[3].x, corners[3].y);
                 endShape(CLOSE);
 
-                // 꼭짓점에 마우스로 잡을 수 있는 원형 핀 그리기
                 for (let i = 0; i < 4; i++) {
                     fill(0, 255, 0);
-                    ellipse(corners[i].x, corners[i].y, 15, 15);
+                    noStroke();
+                    ellipse(corners[i].x, corners[i].y, 16, 16);
                 }
             }
         }
 
-        // --- 마우스 인터랙션을 통한 코너 핀 조정 로직 ---
+        // Web Serial API 아두이노 실시간 데이터 파싱 및 매핑 인터랙션 함수
+        async function connectSerial() {
+            try {
+                const port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 9600 }); 
+                document.getElementById('connect-btn').style.display = 'none';
+                
+                const textDecoder = new TextDecoderStream();
+                const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+                const inputStream = textDecoder.readable;
+                const reader = inputStream.getReader();
+
+                let buffer = "";
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    if (value) {
+                        buffer += value;
+                        let lines = buffer.split("\n");
+                        buffer = lines.pop(); 
+
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (line.length > 0) {
+                                let data = line.split(" ");
+                                if (data.length === 2) {
+                                    currentDistA = Number(data[0]);
+                                    currentDistB = Number(data[1]);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("시리얼 포트 연결 실패:", error);
+                alert("하드웨어 연결에 실패했습니다.");
+            }
+        }
+
+        // --- 마우스 드래그 인터랙션 제어 ---
         function mousePressed() {
             if (!isMappingMode) return;
-            
-            // WEBGL 모드이므로 마우스 좌표를 중심 기준으로 보정
             let mx = mouseX - width / 2;
             let my = mouseY - height / 2;
-
-            // 어떤 꼭짓점을 클릭했는지 탐색
             for (let i = 0; i < 4; i++) {
                 let d = dist(mx, my, corners[i].x, corners[i].y);
-                if (d < 20) { // 20픽셀 이내 반경 클릭 시 선택
+                if (d < 20) {
                     selectedCorner = i;
                     break;
                 }
@@ -171,62 +336,139 @@
 
         function mouseDragged() {
             if (selectedCorner !== -1) {
-                // 드래그하는 대로 코너 핀 위치 이동 가능
                 corners[selectedCorner].x = mouseX - width / 2;
                 corners[selectedCorner].y = mouseY - height / 2;
             }
         }
 
         function mouseReleased() {
-            selectedCorner = -1;
+            selectedCorner = -1; 
         }
 
-        // --- 키보드 'm' 키를 누르면 매핑 가이드라인을 끄고 켤 수 있음 ---
         function keyPressed() {
             if (key === 'm' || key === 'M') {
-                isMappingMode = !isMappingMode; // Toggle 가이드라인
+                isMappingMode = !isMappingMode;
             }
         }
 
-        // 브라우저 리사이즈 대응
         function windowResized() {
             resizeCanvas(windowWidth, windowHeight);
         }
 
-        // --- Web Serial API 아두이노 데이터 수신 로직 (동일) ---
-        async function connectSerial() {
-            try {
-                port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 9600 });
-                document.getElementById('connect-btn').style.display = 'none';
-                
-                const textDecoder = new TextDecoderStream();
-                const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
-                const inputStream = textDecoder.readable;
-                reader = inputStream.getReader();
+        // 세로형 입체 통로 단백질 드로잉 함수
+        function drawChannelProtein(x, y, phase) {
+            pg.push();
+            pg.translate(x, y);
+            pg.fill(139, 94, 60, 240); // Rustic Brown
+            pg.stroke(226, 176, 126, 180); // Soft Amber외곽
+            pg.strokeWeight(2);
 
-                let buffer = "";
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    if (value) {
-                        buffer += value;
-                        let lines = buffer.split("\n");
-                        buffer = lines.pop(); 
-                        for (let line of lines) {
-                            line = line.trim();
-                            if (line.length > 0) {
-                                let data = line.split(" ");
-                                if (data.length === 2) {
-                                    distance = Number(data[0]);
-                                    pulseValue = Number(data[1]);
-                                }
-                            }
+            let openOffset = 0;
+            if (phase === 4) {
+                let elapsed = millis() - touchStartTime;
+                openOffset = map(elapsed, 0, TOUCH_HOLD_TIME, 0, 35);
+                openOffset = constrain(openOffset, 0, 35);
+            }
+
+            // 좌측 단백질 쉘
+            pg.beginShape();
+            pg.vertex(-20 - openOffset, -50);
+            pg.bezierVertex(-5 - openOffset, -20, -5 - openOffset, 20, -20 - openOffset, 50);
+            pg.vertex(-45 - openOffset, 30);
+            pg.vertex(-45 - openOffset, -30);
+            pg.endShape(CLOSE);
+
+            // 우측 단백질 쉘
+            pg.beginShape();
+            pg.vertex(20 + openOffset, -50);
+            pg.bezierVertex(5 + openOffset, -20, 5 + openOffset, 20, 20 + openOffset, 50);
+            pg.vertex(45 + openOffset, 30);
+            pg.vertex(45 + openOffset, -30);
+            pg.endShape(CLOSE);
+            pg.pop();
+        }
+
+        // 가리비형 반원 세포 클래스 (세로축 완벽 대응 보정)
+        class ScallopCell {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type; 
+                this.color = (type === 'A') ? colorA : colorB; 
+                this.baseSize = random(12, 22);
+                this.noiseSeed = random(100);
+                
+                this.velX = random(-1.2, 1.2);
+                this.velY = random(-1.2, 1.2);
+            }
+
+            update(phase) {
+                let centerX = pg.width / 2;
+
+                if (phase === 2) {
+                    this.x += this.velX;
+                    this.y += this.velY;
+                    if (this.x < 0 || this.x > pg.width) this.velX *= -1;
+                    if (this.y < 0 || this.y > pg.height) this.velY *= -1;
+                } 
+                else if (phase === 3) {
+                    // [버그 수정] centerX 참조 차단 해제 및 상/하단 세로 단백질 통로(Y: 250, Y: 650) 주변 수렴 연산
+                    let targetX = centerX + random(-25, 25);
+                    let targetY = (this.y < pg.height / 2) ? 250 : 650;
+                    
+                    this.x = lerp(this.x, targetX, 0.04);
+                    this.y = lerp(this.y, targetY, 0.04);
+                } 
+                else if (phase === 4) {
+                    let elapsed = millis() - touchStartTime;
+                    
+                    if (elapsed < TOUCH_HOLD_TIME) {
+                        // 0~5초: 통로 틈새로 서서히 스며들기 전 전조 대기
+                        let targetX = centerX + (this.type === 'A' ? -15 : 15);
+                        let targetY = (this.y < pg.height / 2) ? 250 : 650;
+                        this.x = lerp(this.x, targetX, 0.02);
+                        this.y = lerp(this.y, targetY, 0.02);
+                    } else {
+                        // 5초 후: 세로막을 뚫고 좌우 진영으로 폭발적 분출 교차 확산
+                        if (this.type === 'A') {
+                            this.velX = lerp(this.velX, -5, 0.06); // 우측에서 좌측 영역으로 돌파
+                        } else {
+                            this.velX = lerp(this.velX, 5, 0.06);  // 좌측에서 우측 영역으로 돌파
                         }
+                        this.x += this.velX;
+                        this.y += this.velY * 0.5 + random(-1, 1);
+
+                        this.x = constrain(this.x, 0, pg.width);
+                        this.y = constrain(this.y, 0, pg.height);
                     }
                 }
-            } catch (error) {
-                console.error("시리얼 연결 실패:", error);
+            }
+
+            display() {
+                pg.push();
+                pg.translate(this.x, this.y);
+                
+                let angle = atan2(this.velY, this.velX);
+                // 우측 입자(A)는 왼쪽을 보게, 좌측 입자(B)는 오른쪽을 보게 기본 방향성 보정
+                if (this.type === 'A') angle += PI;
+                pg.rotate(angle);
+                
+                pg.fill(this.type === 'A' ? colorA : colorB);
+                pg.noStroke();
+
+                pg.beginShape();
+                let resolution = 8;
+                for (let i = 0; i <= resolution; i++) {
+                    let a = map(i, 0, resolution, -HALF_PI, HALF_PI);
+                    let r变形 = this.baseSize + noise(this.noiseSeed + frameCount * 0.03) * 4;
+                    let xOffset = cos(a) * r变形;
+                    let yOffset = sin(a) * r变形;
+                    pg.curveVertex(xOffset, yOffset);
+                }
+                pg.vertex(-this.baseSize * 0.3, this.baseSize);
+                pg.vertex(-this.baseSize * 0.3, -this.baseSize);
+                pg.endShape(CLOSE); // [문법 오류 수정] 누락되어 있던 pg. 텍스처 버퍼 바인딩 정상 마감
+                pg.pop();
             }
         }
     </script>
