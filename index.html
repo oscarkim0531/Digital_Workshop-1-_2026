@@ -32,24 +32,24 @@
         let isMappingMode = true; 
 
         // 하드웨어 조정용 변수 기본 세팅 (현장 튜닝 가능)
-        const START_DISTANCE = 150;     // 관객 감지 시작 거리 (150cm)
-        const THRESHOLD_DISTANCE = 50;  // 세포막 등장 및 포화 시작 임계점 (50cm)
-        const MAX_CLOSE_DISTANCE = 15;   // 최종 밀착 최단 거리 (15cm)
-        const TOUCH_HOLD_TIME = 5000;    // 통로 완전 개방까지 필요한 시간 (5초)
+        const START_DISTANCE = 150;         // 관객 감지 시작 거리 (150cm)
+        const THRESHOLD_DISTANCE = 50;      // 세포막 등장 및 포화 시작 임계점 (50cm)
+        const MAX_CLOSE_DISTANCE = 15;      // 최종 밀착 최단 거리 (15cm)
+        const TOUCH_HOLD_TIME = 5000;       // 통로 완전 개방까지 필요한 시간 (5초)
 
         // 디자인 에셋 변수
-        let colorA = '#D500F9';          // 관객 A의 입자 색상 (러스틱 브라운 - 우측 진영)
-        let colorB = '#FF7043';          // 관객 B의 입자 색상 (소프트 앰버 - 좌측 진영)
+        let colorA = '#D500F9';             // 오른쪽
+        let colorB = '#D0EE17';             // 왼쪽
 
         // --- [수정] 스크립트 상단: 전역 컬러 팔레트 재정의 ---
-        const CLR_HEAD_HUE = '#87CEEB';    // 인지질 머리 기본 하늘색
-        const CLR_HEAD_CORE = '#E0FFFF';   // 인지질 머리 중심 연한 하늘색
-        const CLR_TAIL = '#90EE90';        // 인지질 꼬리 연두색
-        const CLR_PROTEIN = '#FFB6C1';     // 막 단백질 핑크빛 붉은색
+        const CLR_HEAD_HUE = '#87CEEB';     // 인지질 머리 기본 하늘색
+        const CLR_HEAD_CORE = '#E0FFFF';    // 인지질 머리 중심 연한 하늘색
+        const CLR_TAIL = '#90EE90';         // 인지질 꼬리 연두색
+        const CLR_PROTEIN = '#FFB6C1';      // 막 단백질 핑크빛 붉은색
         
         // 입자 컬러 (두 관객의 융합을 위해 유지하되, display에서 입체감 부여)
-        const CLR_PARTICLE_B = '#FF7043';  // 소프트 앰버
-        const CLR_PARTICLE_A = '#D500F9';  // 러스틱 브라운
+        const CLR_PARTICLE_A = '#D500F9';   // 오른쪽
+        const CLR_PARTICLE_B = '#D0EE17';   // 왼쪽
 
         // 하드웨어 입력값 시뮬레이션용 실시간 변수
         let currentDistA = 200;  
@@ -58,7 +58,7 @@
         let isTouchB = false;    
 
         // 시스템 상태 및 타이머 제어 변수
-        let currentPhase = 1;    // 1: 대기, 2: 진입 및 안내, 3: 임계점 포화, 4: 터치 확산
+        let currentPhase = 1;               // 1: 대기, 2: 진입 및 안내, 3: 임계점 포화, 4: 터치 확산
         let touchStartTime = 0;  
         let isTouchTriggered = false; 
 
@@ -271,66 +271,67 @@
                 }
             }
 
-            function drawMembraneWithVolume(membraneAlpha) {
-                let centerX = pg.width / 2;
-                let midX = pg.width / 2;
+        }
 
-                for (let y = 0; y <= pg.height; y += 15) {
-                    // 통로 단백질 구역 스킵 (수정 2번, 3번에서 더 디테일하게 비워둘 예정)
-                    if ((y > 190 && y < 310) || (y > 590 && y < 710)) continue;
+        function drawMembraneWithVolume(membraneAlpha) {
+            let centerX = pg.width / 2;
+            let midX = pg.width / 2;
 
-                    let yOffset = sin(y * 0.05 + frameCount * 0.03) * 3;
+            for (let y = 0; y <= pg.height; y += 15) {
+                // 통로 단백질 구역 스킵 (수정 2번, 3번에서 더 디테일하게 비워둘 예정)
+                if ((y > 190 && y < 310) || (y > 590 && y < 710)) continue;
 
-                    // --- 조형 요소 1: 연두색 꼬리 (Volumetric line) ---
+                let yOffset = sin(y * 0.05 + frameCount * 0.03) * 3;
+
+                // --- 조형 요소 1: 연두색 꼬리 (Volumetric line) ---
+                pg.push();
+                pg.stroke(144, 238, 144, membraneAlpha * 0.7); // CLR_TAIL (#90EE90)
+                pg.strokeWeight(1.5);
+                
+                // 꼬리에도 미세한 두께감을 주기 위해 이중으로 선을 그림
+                pg.line(centerX - 15 + yOffset, y, centerX - 1 + yOffset, y);
+                pg.line(centerX + 15 + yOffset, y, centerX + 1 + yOffset, y);
+                pg.pop();
+
+                let cholesterolNoise = noise(y * 0.1);
+                if (cholesterolNoise > 0.68) {
                     pg.push();
-                    pg.stroke(144, 238, 144, membraneAlpha * 0.7); // CLR_TAIL (#90EE90)
-                    pg.strokeWeight(1.5);
+                    pg.noStroke();
+                    // 노란빛 앰버 컬러 (#FFD700계열 은은한 톤)로 설정하여 세포막의 심심함을 해소
+                    pg.fill(226, 176, 126, membraneAlpha * 0.8); // 소프트 앰버 톤 매칭
                     
-                    // 꼬리에도 미세한 두께감을 주기 위해 이중으로 선을 그림
-                    pg.line(centerX - 15 + yOffset, y, centerX - 1 + yOffset, y);
-                    pg.line(centerX + 15 + yOffset, y, centerX + 1 + yOffset, y);
-                    pg.pop();
-
-                    let cholesterolNoise = noise(y * 0.1);
-                    if (cholesterolNoise > 0.68) {
-                        pg.push();
-                        pg.noStroke();
-                        // 노란빛 앰버 컬러 (#FFD700계열 은은한 톤)로 설정하여 세포막의 심심함을 해소
-                        pg.fill(226, 176, 126, membraneAlpha * 0.8); // 소프트 앰버 톤 매칭
-                        
-                        // 막을 관통하지 않고 인지질 내부(왼쪽 혹은 오른쪽 꼬리 층 사이)에 쏙 박힌 타원형 디자인
-                        let sideOffset = (cholesterolNoise > 0.8) ? -8 : 8;
-                        pg.ellipse(centerX + sideOffset + yOffset, y - 7, 5, 8);
-                        pg.pop();
-                    }
-
-                    // --- 조형 요소 2: 그라데이션 인지질 머리 (Sphere effect) ---
-                    // p5.js WEBGL 쉐이더 없이 그라데이션 Sphere 느낌을 내는 'Fake shading' 기법
-                    pg.push();
-                    pg.noStroke();
-
-                    // 왼쪽 머리
-                    pg.translate(centerX - 15 + yOffset, y);
-                    pg.fill(135, 206, 235, membraneAlpha); // CLR_HEAD_HUE
-                    pg.ellipse(0, 0, 10, 10);
-                    pg.fill(224, 255, 255, membraneAlpha); // CLR_HEAD_CORE
-                    pg.ellipse(0, 0, 6, 6);
-                    pg.fill(255, membraneAlpha * 0.5); 
-                    pg.ellipse(-2, -2, 2, 2); 
-                    pg.pop();
-
-                    // 오른쪽 머리
-                    pg.push();
-                    pg.noStroke();
-                    pg.translate(centerX + 15 + yOffset, y);
-                    pg.fill(135, 206, 235, membraneAlpha); 
-                    pg.ellipse(0, 0, 10, 10);
-                    pg.fill(224, 255, 255, membraneAlpha); 
-                    pg.ellipse(0, 0, 6, 6);
-                    pg.fill(255, membraneAlpha * 0.5); 
-                    pg.ellipse(-2, -2, 2, 2); 
+                    // 막을 관통하지 않고 인지질 내부(왼쪽 혹은 오른쪽 꼬리 층 사이)에 쏙 박힌 타원형 디자인
+                    let sideOffset = (cholesterolNoise > 0.8) ? -8 : 8;
+                    pg.ellipse(centerX + sideOffset + yOffset, y - 7, 5, 8);
                     pg.pop();
                 }
+
+                // --- 조형 요소 2: 그라데이션 인지질 머리 (Sphere effect) ---
+                // p5.js WEBGL 쉐이더 없이 그라데이션 Sphere 느낌을 내는 'Fake shading' 기법
+                pg.push();
+                pg.noStroke();
+
+                // 왼쪽 머리
+                pg.translate(centerX - 15 + yOffset, y);
+                pg.fill(135, 206, 235, membraneAlpha); // CLR_HEAD_HUE
+                pg.ellipse(0, 0, 10, 10);
+                pg.fill(224, 255, 255, membraneAlpha); // CLR_HEAD_CORE
+                pg.ellipse(0, 0, 6, 6);
+                pg.fill(255, membraneAlpha * 0.5); 
+                pg.ellipse(-2, -2, 2, 2); 
+                pg.pop();
+
+                // 오른쪽 머리
+                pg.push();
+                pg.noStroke();
+                pg.translate(centerX + 15 + yOffset, y);
+                pg.fill(135, 206, 235, membraneAlpha); 
+                pg.ellipse(0, 0, 10, 10);
+                pg.fill(224, 255, 255, membraneAlpha); 
+                pg.ellipse(0, 0, 6, 6);
+                pg.fill(255, membraneAlpha * 0.5); 
+                pg.ellipse(-2, -2, 2, 2); 
+                pg.pop();
             }
         }
 
@@ -452,15 +453,18 @@
             constructor(x, y, type) {
                 this.x = x;
                 this.y = y;
-                this.type = type; 
+                this.type = type; // 'A': 우측(바이올렛), 'B': 좌측(시안)
                 this.color = (type === 'A') ? colorA : colorB; 
                 this.baseSize = random(5, 11);
                 this.noiseSeed = random(100);
                 
                 this.velX = random(-1.5, 1.5);
                 this.velY = random(-1.5, 1.5);
-            }
 
+                // 0: 통로 수렴 및 장벽 관통 그룹
+                // 1: 통로 무시 및 기존 진영 자율 유영 그룹
+                this.group = random() > 0.5 ? 0 : 1; 
+            }
             update(phase) {
                 let centerX = pg.width / 2;
 
@@ -472,85 +476,160 @@
                     if (this.type === 'B') {
                         // 좌측 진영 입자는 0 ~ 중앙선(300) 사이에서만 튕김
                         if (this.x < 0) { this.x = 0; this.velX *= -1; }
-                        if (this.x > centerX - 15) { this.x = centerX - 15; this.velX *= -1; } // 막 두께 고려
+                        if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; } // 막 두께 고려
                     } else {
                         // 우측 진영 입자는 중앙선(300) ~ 우측 끝(600) 사이에서만 튕김
-                        if (this.x < centerX + 15) { this.x = centerX + 15; this.velX *= -1; }
+                        if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
                         if (this.x > pg.width) { this.x = pg.width; this.velX *= -1; }
                     }
                 } 
 
                 else if (phase === 3) {
-                    // [수정] 50cm ~ 15cm 거리에 비례하여 점진적으로 인력(자석 힘)이 강해지도록 매핑
-                    // 두 관객의 현재 평균 거리를 기반으로 수렴 가중치 계산
-                    let avgDist = (currentDistA + currentDistB) / 2;
-                    
-                    // 50cm일 때는 0.01(거의 안 끌림), 15cm에 도달하면 0.08(강하게 압착)로 점진적 스케일링
-                    let lerpFactor = map(avgDist, MAX_CLOSE_DISTANCE, THRESHOLD_DISTANCE, 0.08, 0.01);
-                    lerpFactor = constrain(lerpFactor, 0.01, 0.08);
+                    // [핵심 추가] 50cm 이하 진입 시 그룹별 차별화 모션 분기 연산
+                    if (this.group === 1) {
+                        // [자율 유영 그룹]: 3단계 상태가 되어도 통로로 모이지 않고, 2단계의 자유 무브먼트를 그대로 수행!
+                        this.x += this.velX;
+                        this.y += this.velY;
+                        if (this.y < 0 || this.y > pg.height) this.velY *= -1;
+                        if (this.type === 'B') {
+                            if (this.x < 0) { this.x = 0; this.velX *= -1; }
+                            if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; } 
+                        } else {
+                            if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                            if (this.x > pg.width) { this.x = pg.width; this.velX *= -1; }
+                        }
+                    } 
+                    else {
+                        // [수렴 그룹 (group 0)]: 승민님이 대만족하신 납작한 타원 공간 압착 거동 완벽 수행
+                        let avgDist = (currentDistA + currentDistB) / 2;
+                        let lerpFactor = map(avgDist, 20, THRESHOLD_DISTANCE, 0.05, 0.008);
+                        lerpFactor = constrain(lerpFactor, 0.008, 0.05);
 
-                    // [수정] 하나의 점으로 뭉치지 않도록 입자 생성 시 가졌던 noiseSeed를 활용해 고유의 수렴 목적지 오프셋 설정
-                    // X축은 세로막 경계선 기준 자기 진영 쪽으로 살짝 여유를 둠 (막 두께 안쪽 공간 배치)
-                    let targetX = centerX + (this.type === 'A' ? 25 : -25);
-                    
-                    // Y축은 상단 통로(250)와 하단 통로(650) 주변의 '공간 반경(-35 ~ 35)' 구역으로 분산 수렴
-                    let baseTargetY = (this.y < pg.height / 2) ? 250 : 650;
-                    
-                    // 각 입자마다 통로 주변에 머무를 고유한 사각형 공간 좌표를 수학적으로 고정 (점 수렴 방지)
-                    let offsetX = (noise(this.noiseSeed * 2) - 0.5) * 20; // 통로 근처 좌우 두께감
-                    let offsetY = (noise(this.noiseSeed * 3) - 0.5) * 50; // 통로 근처 위아래 바글바글함
-                    
-                    let finalTargetX = targetX + offsetX;
-                    let finalTargetY = baseTargetY + offsetY;
+                        let baseTargetY = (this.y < pg.height / 2) ? 250 : 650;
+                        let angleSeed = this.noiseSeed * 123.45 % TWO_PI;
+                        
+                        let ellipseRadiusX = random(5, 15);
+                        let ellipseRadiusY = random(-40, 40);
 
-                    // 점진적으로 증가하는 인력(lerpFactor)에 따라 통로 주변 공간 영역으로 자연스럽게 압착 수렴
-                    this.x = lerp(this.x, finalTargetX, lerpFactor);
-                    this.y = lerp(this.y, finalTargetY, lerpFactor);
+                        let targetX, targetY;
+                        if (this.type === 'B') {
+                            targetX = (centerX - 55) - abs(cos(angleSeed) * ellipseRadiusX);
+                            targetY = baseTargetY + ellipseRadiusY;
+                        } else {
+                            targetX = (centerX + 55) + abs(cos(angleSeed) * ellipseRadiusX);
+                            targetY = baseTargetY + ellipseRadiusY;
+                        }
+
+                        let breathEffectX = sin(frameCount * 0.05 + this.noiseSeed) * 2;
+                        let breathEffectY = cos(frameCount * 0.05 + this.noiseSeed) * 3;
+
+                        this.x = lerp(this.x, targetX + breathEffectX, lerpFactor);
+                        this.y = lerp(this.y, targetY + breathEffectY, lerpFactor);
+                    }
                 }
 
                 else if (phase === 4) {
                     let elapsed = millis() - touchStartTime;
                     
                     if (elapsed < TOUCH_HOLD_TIME) {
-                        // 4-1. [초기 전조 단계: 0~5초] 
-                        // 통로가 미세하게 열리며 통로 중심 구멍(Y:250, Y:650)의 정중앙 틈새로 더 꽉 압착됨
-                        let targetX = centerX;
-                        let targetY = (this.y < pg.height / 2) ? 250 : 650;
-                        
-                        // 통로 정중앙 틈새로 빨려 들어가는 물리 연산
-                        this.x = lerp(this.x, targetX, 0.05);
-                        this.y = lerp(this.y, targetY, 0.05);
-                    } else {
-                        // 4-2. [삼투 폭발 및 농도 평형 단계: 5초 이후]
-                        // 드디어 통로가 완전히 개방되어 반대 진영으로 강렬하게 쏟아져 나감
-                        
-                        let burstElapsed = elapsed - TOUCH_HOLD_TIME; // 5초 이후부터 흐른 시간
-                        
-                        // 초반 3초 동안은 강력하게 뿜어지고, 시간이 지날수록 분출 속도가 서서히 감속되는 감속(Damping) 알고리즘
-                        // 댐이 터지는 에너지가 부드러운 유체의 잔잔한 흐름으로 치환되는 기전
-                        let speedFactor = exp(-burstElapsed * 0.0005); // 지수 감속 함수 적용
-                        
-                        if (this.velX === random(-1.2, 1.2)) { // 초기 분출 속도가 세팅되지 않았다면 트리거
-                            // 내 진영의 반대 방향으로 강한 힘 벡터 인젝션
-                            this.velX = (this.type === 'A') ? random(-8, -5) : random(5, 8);
-                            this.velY = random(-3, 3);
+                        // -------------------------------------------------------------
+                        // [2단계 마일스톤 수정 완료] 터치 초입(0~5초) 그룹별 거동 분기
+                        // -------------------------------------------------------------
+                        if (this.group === 1) {
+                            // [독립 유영 그룹]: 터치가 시작되어도 휩쓸리지 않고 기존 진영 내 자유 유영을 유지!
+                            this.x += this.velX;
+                            this.y += this.velY;
+                            if (this.y < 0 || this.y > pg.height) this.velY *= -1;
+                            if (this.type === 'B') {
+                                if (this.x < 0) { this.x = 0; this.velX *= -1; }
+                                if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; } 
+                            } else {
+                                if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                                if (this.x > pg.width) { this.x = pg.width; this.velX *= -1; }
+                            }
+                        } 
+                        else {
+                            // [수렴/관통 그룹]: 통로가 미세하게 열리며 통로 중심 구멍 틈새로 극대화되어 압착
+                            let targetX = centerX;
+                            let targetY = (this.y < pg.height / 2) ? 250 : 650;
+                            
+                            // 틈새 구멍으로 꽉 짜내 지듯 빨려 들어가는 물리 선형 보간
+                            this.x = lerp(this.x, targetX, 0.06);
+                            this.y = lerp(this.y, targetY, 0.06);
                         }
+                    }
+                    else {
+                        // -------------------------------------------------------------
+                        // [3단계 마일스톤 최종 수정 완료] 5초 후 완전 개방 시 그룹별 대조 분출 및 평형
+                        // -------------------------------------------------------------
+                        let burstElapsed = elapsed - TOUCH_HOLD_TIME; // 5초 이후부터 흐른 시간
+                        let speedFactor = exp(-burstElapsed * 0.0005); // 지수 감속 계수
 
-                        // 감속 계수(speedFactor)를 속도에 결합하여 서서히 에너지를 줄임
-                        this.x += this.velX * speedFactor;
-                        this.y += this.velY * speedFactor;
+                        if (this.group === 1) {
+                            // ---------------------------------------------------------
+                            // [독립 유영 그룹]: 통로가 열려도 절대 관통 불가! 기존 진영 내 잠금 유지
+                            // ---------------------------------------------------------
+                            this.x += this.velX * speedFactor;
+                            this.y += this.velY * speedFactor;
 
-                        // [핵심] 에너지가 빠진 후(터치 후 약 8초 이후), 화면 전체 공간에 고루 퍼져 유영하도록 
-                        // 펄린 노이즈(Perlin Noise) 기반의 잔잔한 삼투 흐름(Flow)을 강제로 부여함
-                        let flowAngle = noise(this.x * 0.005, this.y * 0.005, frameCount * 0.01) * TWO_PI * 2;
-                        this.x += cos(flowAngle) * 0.8;
-                        this.y += sin(flowAngle) * 0.8;
+                            // 4단계 특유의 잔잔한 유체 흐름(Perlin Noise)은 동기화하여 평형 무드 유도
+                            let flowScale = 0.004;
+                            let flowAngle = noise(this.x * flowScale, this.y * flowScale, frameCount * 0.012) * TWO_PI * 2;
+                            this.x += cos(flowAngle) * 0.5;
+                            this.y += sin(flowAngle) * 0.5;
 
-                        // [격리벽 완전 소멸] 이제 중앙 세로 장벽을 완전히 무시하고 전체 600x1000 캔버스 전체 벽면에서 자유롭게 바운스
-                        if (this.x < 0) { this.x = 0; this.velX *= -1; }
-                        if (this.x > pg.width) { this.x = pg.width; this.velX *= -1; }
-                        if (this.y < 0) { this.y = 0; this.velY *= -1; }
-                        if (this.y > pg.height) { this.y = pg.height; this.velY *= -1; }
+                            // [철통 보안] 터치 후에도 여전히 강낭콩 단백질 너비(50px) 밖 자기 진영에 가둠
+                            if (this.y < 5) { this.y = 5; this.velY *= -1; }
+                            if (this.y > pg.height - 5) { this.y = pg.height - 5; this.velY *= -1; }
+                            
+                            if (this.type === 'B') {
+                                if (this.x < 5) { this.x = 5; this.velX *= -1; }
+                                if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; }
+                            } else {
+                                if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                                if (this.x > pg.width - 5) { this.x = pg.width - 5; this.velX *= -1; }
+                            }
+                        } 
+                        else {
+                            // ---------------------------------------------------------
+                            // [수렴/관통 그룹]: 오직 이 그룹만 세로막 통로를 관통하여 반대편 진영 안착
+                            // ---------------------------------------------------------
+                            // X축 중심 부근을 통과할 때, 인지질 벽을 뚫지 않고 오직 강낭콩 통로 구멍(250, 650)으로만 빠져나가도록 유도
+                            if ((this.type === 'B' && this.x < centerX + 20) || (this.type === 'A' && this.x > centerX - 20)) {
+                                let targetY = (this.y < pg.height / 2) ? 250 : 650;
+                                this.y = lerp(this.y, targetY, 0.2); // 통로 구멍 높이로 강제 바인딩
+                            }
+
+                            // 초기 폭발 추진력 부여 (최초 1회 진입 시 벡터 설정)
+                            if (this.velX === random(-1.5, 1.5) || abs(this.velX) < 2) {
+                                let angleRange = random(-QUARTER_PI, QUARTER_PI); // -45도 ~ 45도 부채꼴 분사
+                                let burstSpeed = random(6, 9); 
+                                
+                                if (this.type === 'B') {
+                                    this.velX = cos(angleRange) * burstSpeed;
+                                    this.velY = sin(angleRange) * burstSpeed;
+                                } else {
+                                    this.velX = -cos(angleRange) * burstSpeed;
+                                    this.velY = sin(angleRange) * burstSpeed;
+                                }
+                            }
+
+                            // 감속 속도 적용 이동
+                            this.x += this.velX * speedFactor;
+                            this.y += this.velY * speedFactor;
+
+                            // 잔잔하게 번지는 유체 흐름 추가
+                            let flowScale = 0.004;
+                            let flowAngle = noise(this.x * flowScale, this.y * flowScale, frameCount * 0.012) * TWO_PI * 2;
+                            this.x += cos(flowAngle) * 0.9;
+                            this.y += sin(flowAngle) * 0.9;
+
+                            // [격리벽 완전 소멸] 관통 그룹은 이제 세포막 제약 없이 전체 캔버스 공간을 자유롭게 유영
+                            if (this.x < 5) { this.x = 5; this.velX *= -1; }
+                            if (this.x > pg.width - 5) { this.x = pg.width - 5; this.velX *= -1; }
+                            if (this.y < 5) { this.y = 5; this.velY *= -1; }
+                            if (this.y > pg.height - 5) { this.y = pg.height - 5; this.velY *= -1; }
+                        }
                     }
                 }
             }
@@ -571,9 +650,9 @@
                 let resolution = 8;
                 for (let i = 0; i <= resolution; i++) {
                     let a = map(i, 0, resolution, -HALF_PI, HALF_PI);
-                    let roastbeef = this.baseSize + noise(this.noiseSeed + frameCount * 0.03) * 4;
-                    let xOffset = cos(a) * roastbeef;
-                    let yOffset = sin(a) * roastbeef;
+                    let rDeform = this.baseSize + noise(this.noiseSeed + frameCount * 0.03) * 4;
+                    let xOffset = cos(a) * rDeform;
+                    let yOffset = sin(a) * rDeform;
                     pg.curveVertex(xOffset, yOffset);
                 }
                 pg.vertex(-this.baseSize * 0.3, this.baseSize);
