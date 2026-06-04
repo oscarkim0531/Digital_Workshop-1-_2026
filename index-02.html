@@ -201,14 +201,19 @@
             // -------------------------------------------------------------
             if (currentPhase >= 2) {
                 pg.push();
-                // Phase 2 초입 단계에서는 은은한 실루엣 느낌을 주다가, Phase 3 포화 시 선명해지도록 유도
                 let membraneAlpha = (currentPhase === 2) ? 140 : 255; 
 
-                // [교수님 크리틱 전면 반영]: 전체 폭의 60%를 장악하는 웅장한 크기의 인지질 드로잉 함수 호출
+                // [연동 패치]: 단백질이 위치한 정중앙(Y축 500) 지점의 세포막 실제 사인파 변위값을 역계산합니다.
+                // drawGiantMembrane에서 사용한 고진폭 사인파 공식(y * 0.003 + frameCount * 0.025)과 수치를 완벽히 일치시킵니다.
+                let centralMembraneWave = sin(500 * 0.003 + frameCount * 0.025) * 40;
+                centralMembraneWave += (noise(500 * 0.02, frameCount * 0.01) - 0.5) * 8;
+
+                // 먼저 세포막 장벽을 렌더링합니다.
                 drawGiantMembrane(membraneAlpha);
 
-                // 단백질 통로 1개를 정중앙에 거대하게 배치
-                drawGiantChannelProtein(centerX, pg.height / 2, currentPhase); 
+                // [연동 패치]: 단백질의 X축 중심 좌표에 세포막의 실시간 파동 변위(centralMembraneWave)를 더해 
+                // 장벽이 왼쪽으로 휠 때 단백질도 왼쪽으로, 오른쪽으로 휠 때 오른쪽으로 한 몸처럼 밀리게 만듭니다.
+                drawGiantChannelProtein(centerX + centralMembraneWave, pg.height / 2, currentPhase); 
                 pg.pop();
             }
 
@@ -286,26 +291,57 @@
         function drawGiantMembrane(membraneAlpha) {
             let centerX = pg.width / 2;
 
-            for (let y = 0; y <= pg.height; y += 18) {
-                // 중앙에 박힐 거대 단백질 통로의 Y축 영역(360 ~ 640)은 조형을 깔끔하게 비워둠
-                if (y > 350 && y < 650) continue;
+            for (let y = 0; y <= pg.height; y += 28) {
+                // 중앙에 박힐 거대 단백질 통로의 Y축 영역(410 ~ 570)은 조형을 깔끔하게 비워둠
+                if (y > 420 && y < 570) continue;
+                
 
                 // [교수님 크리틱 반영 핵심]: 복합 펄린 노이즈를 믹스하여 미세하게 "숨쉬며 꿈틀거리는" 유기적 파동 연산
-                let noiseWave = noise(y * 0.01, frameCount * 0.02) * 12;
-                let sineWave = sin(y * 0.04 + frameCount * 0.04) * 4;
-                let organicOffset = noiseWave + sineWave - 6;
+                let macroMove = sin(y * 0.003 + frameCount * 0.025) * 30;
+                let microTremor = sin(y * 0.1 + frameCount * 0.08) * 3;          // 생체막 특유의 미세한 떨림
+                let brownian = (noise(y * 0.05, frameCount * 0.04) - 0.5) * 2.5; // 분자 단위의 불규칙한 거동
+
+                macroMove += (noise(y * 0.02, frameCount * 0.01) - 0.5) * 8;
+
+                let organicOffset = macroMove + microTremor + brownian;
 
                 // [조형 스케일 확대]: 인지질 꼬리 너비를 기존 15px에서 80px로 대폭 늘려 60% 비례 확보
                 let membraneWidth = 80;
 
-                // --- 조형 1: 숨쉬는 연두색 꼬리 이중층 레이어 ---
+                let leftX = centerX - membraneWidth + organicOffset;
+                let rightX = centerX + membraneWidth + organicOffset;
+
+                // --- 조형 1: [2단계 디벨롭] 찰랑거리는 이중 유기적 베지에 꼬리 사슬 묘사 ---
                 pg.push();
-                pg.stroke(144, 238, 144, membraneAlpha * 0.5); // CLR_TAIL 부드럽게 시각화
-                pg.strokeWeight(2);
-                // 왼쪽 진영 내부로 뻗은 연두색 꼬리 선
-                pg.line(centerX - membraneWidth + organicOffset, y, centerX - 5 + organicOffset, y);
-                // 오른쪽 진영 내부로 뻗은 연두색 꼬리 선
-                pg.line(centerX + membraneWidth + organicOffset, y, centerX + 5 + organicOffset, y);
+                pg.noFill();
+                pg.stroke(144, 238, 144, membraneAlpha * 0.45); 
+                pg.strokeWeight(10); // 선을 얇게 쓰고 촘촘하게 겹쳐서 실제 섬유질 질감 연출
+
+                // 매 프레임 시간의 흐름에 따라 꼬리 끝자락이 은은하게 꿈틀거리도록 파동 가중치 연산
+                let tailWiggle = sin(frameCount * 0.05 + y * 0.2) * 12;
+                
+
+                // [왼쪽 인지질 장벽] 머리(leftX)에서 출발하여 중앙으로 뻗어나가는 이중 탄소 사슬
+                pg.beginShape();
+                pg.vertex(leftX, y);
+                pg.bezierVertex(leftX + 25, y - 4, leftX + 45, y + 4 + tailWiggle, centerX - 8 + organicOffset, y + tailWiggle * 0.5);
+                pg.endShape();
+
+                pg.beginShape();
+                pg.vertex(leftX, y);
+                pg.bezierVertex(leftX + 20, y + 5, leftX + 40, y - 5 - tailWiggle, centerX - 12 + organicOffset, y - tailWiggle * 0.3);
+                pg.endShape();
+
+                // [오른쪽 인지질 장벽] 머리(rightX)에서 출발하여 중앙으로 뻗어 들어오는 이중 탄소 사슬
+                pg.beginShape();
+                pg.vertex(rightX, y);
+                pg.bezierVertex(rightX - 25, y - 4, rightX - 45, y + 4 - tailWiggle, centerX + 8 + organicOffset, y - tailWiggle * 0.5);
+                pg.endShape();
+
+                pg.beginShape();
+                pg.vertex(rightX, y);
+                pg.bezierVertex(rightX - 20, y + 5, rightX - 40, y - 5 + tailWiggle, centerX + 12 + organicOffset, y + tailWiggle * 0.3);
+                pg.endShape();
                 pg.pop();
 
                 // --- [디테일 팁 적용]: 인지질 레이어 사이에 쏙 박힌 타원형 비관통 콜레스테롤 삽입 ---
@@ -319,66 +355,115 @@
                     pg.pop();
                 }
 
-                // --- 조형 2: 입체 그라데이션 인지질 머리 (Sphere Fake Shading 기법) ---
-                // 왼쪽 외곽 머리 구체
+                // --- [1단계 핵심]: 격자 패턴성 해체를 위한 호흡하는 구체 크기 보간 연산 ---
+                // 인지질 머리들이 일제히 똑같은 크기로 굳어있지 않고, 시간과 Y축 위상에 따라 미세하게 숨쉬듯 수축이완함
+                let breatheSize = sin(frameCount * 0.05 + y * 0.5) * 2.5;
+                let headSize = 25 + breatheSize; // 기본 지름 25px 기준으로 유연하게 변화
+
+                // --- 조형 3: 왼쪽 그라데이션 인지질 머리 (Sphere Fake Shading 공학 기법) ---
                 pg.push();
                 pg.noStroke();
-                pg.translate(centerX - membraneWidth + organicOffset, y);
-                pg.fill(135, 206, 235, membraneAlpha); // 기본 하늘색
-                pg.ellipse(0, 0, 16, 16); // 크기도 10px에서 16px로 대폭 벌크업
-                pg.fill(224, 255, 255, membraneAlpha); // 연한 중심 코어색
-                pg.ellipse(0, 0, 10, 10);
-                pg.fill(255, membraneAlpha * 0.7); // 광학 하이라이트 화이트 도트
-                pg.ellipse(-3, -3, 3, 3);
+                pg.translate(leftX, y);
+                pg.fill(100, 180, 220, membraneAlpha); // 1 레이어 외곽: 깊은 시안 하늘색으로 입체 경계벽 형성
+                pg.ellipse(0, 0, headSize, headSize);
+                pg.fill(180, 245, 255, membraneAlpha); // 2 레이어 중간: 전이 영역 보간
+                pg.ellipse(0, 0, headSize * 0.65, headSize * 0.75);
+                pg.fill(240, 255, 255, membraneAlpha); // 3 레이어 코어: 현미경 광학 하이라이트 중심점
+                pg.ellipse(-headSize * 0.18, -headSize * 0.18, headSize * 0.3, headSize * 0.3);
                 pg.pop();
 
-                // 오른쪽 외곽 머리 구체
+                // --- 조형 4: 오른쪽 그라데이션 인지질 머리 (Sphere Fake Shading 공학 기법) ---
                 pg.push();
                 pg.noStroke();
-                pg.translate(centerX + membraneWidth + organicOffset, y);
-                pg.fill(135, 206, 235, membraneAlpha); 
-                pg.ellipse(0, 0, 16, 16);
-                pg.fill(224, 255, 255, membraneAlpha); 
-                pg.ellipse(0, 0, 10, 10);
-                pg.fill(255, membraneAlpha * 0.7); 
-                pg.ellipse(-3, -3, 3, 3);
+                pg.translate(rightX, y);
+                pg.fill(100, 180, 220, membraneAlpha); 
+                pg.ellipse(0, 0, headSize, headSize);
+                pg.fill(180, 245, 255, membraneAlpha); 
+                pg.ellipse(0, 0, headSize * 0.65, headSize * 0.75);
+                pg.fill(240, 255, 255, membraneAlpha); 
+                pg.ellipse(-headSize * 0.18, -headSize * 0.18, headSize * 0.3, headSize * 0.3);
                 pg.pop();
             }
         }
 
         // ==========================================================================
-        // 🔬 [DEVELOP] 화면 정중앙에 가로지르는 웅장한 볼륨감의 거대 강낭콩 단백질
+        // 🔬 [수정 완료]: 변수 선언 위계 정돈으로 터치 개방 애니메이션 안정화
         // ==========================================================================
         function drawGiantChannelProtein(x, y, phase) {
             pg.push();
             pg.translate(x, y);
             
-            // 핑크빛 붉은색에 화사한 리퀴드 감각의 외곽 하이라이트 매칭
-            pg.fill(255, 182, 193, 245); 
-            pg.stroke(224, 255, 255, 210); 
+            pg.fill(255, 170, 185, 250); // 레퍼런스의 리퀴드한 핑크빛 레드 톤 유지
+            pg.stroke(235, 255, 255, 220); 
             pg.strokeWeight(3.5);
 
-            // Phase 2에서는 단백질 통로가 완벽하게 밀착되어 닫혀있음 (openOffset = 0)
-            let openOffset = 0;
+            // [회전축 교정]: Y축 장벽 위계에 맞춰, 터치 시 상단/하단 쉘이 위아래(Y축)로 벌어지도록 openOffset 결합
+            let openOffset = 0; 
+            if (phase === 4) {
+                let elapsed = millis() - touchStartTime;
+                openOffset = map(elapsed, 0, TOUCH_HOLD_TIME, 0, 35);
+                openOffset = constrain(openOffset, 0, 35);
+            }
 
-            // --- 조형 A: 둥글둥글하고 매끄러운 상단 거대 강낭콩 쉘 ---
+            // p5.js 표준 라디안 제어 상수 계산
+            let halfOfPi = HALF_PI;
+
+            // --- 조형 A: [레퍼런스 가로 회전] 유기적으로 넘실거리는 상단 단백질 서브유닛 (-openOffset) ---
             pg.beginShape();
-            // 스케일을 기존보다 약 2배 이상 키워 거대 세포막 비례에 완벽 동기화 (-45 -> -90)
-            pg.vertex(-90, -30 - openOffset);
-            pg.bezierVertex(-40, -10 - openOffset, 40, -10 - openOffset, 90, -30 - openOffset);
-            pg.bezierVertex(110, -80 - openOffset, 70, -120 - openOffset, 0, -120 - openOffset);
-            pg.bezierVertex(-70, -120 - openOffset, -110, -80 - openOffset, -90, -30 - openOffset);
+            for (let i = 0; i <= 30; i++) {
+                // 호를 그리며 왼쪽에서 오른쪽으로 상단 곡면을 타고 도는 좌표계 파싱 (180도 ~ 360도)
+                let angle = map(i, 0, 30, PI, TWO_PI);
+                
+                // 외곽선이 굳어있지 않고 세포막 결을 따라 일렁이도록 독립 노이즈 펄싱 매립
+                let pNoise = noise(cos(angle) * 1.3, sin(angle) * 1.2, frameCount * 0.02) * 12;
+                
+                // [조형 찌그러짐 전면 해결]: 장폭과 단폭의 비례를 리밸런싱하여 웅장하고 매끄러운 쉘 형태 도출
+                let rX = 135 + pNoise; 
+                let rY = 75 + pNoise; 
+                
+                let ptX = cos(angle) * rX;
+                // 개방 시 상단 쉘 전체가 위쪽(Y축 음수 방향)으로 부드럽게 수평 이동
+                let ptY = sin(angle) * rY - 18 - openOffset;
+                
+                // [레퍼런스 가로 고증]: 좌우 진영을 잇는 가로형 관통 홈(Horizontal Pore) 입구 스무딩 제어
+                if (angle > PI && angle < PI + 0.5) {
+                    ptY += (35 - pNoise * 0.3); // 상단 쉘의 왼쪽 입구 홈 파내기
+                }
+                if (angle > TWO_PI - 0.5 && angle < TWO_PI) {
+                    ptY += (35 - pNoise * 0.3); // 상단 쉘의 오른쪽 입구 홈 파내기
+                }
+                pg.vertex(ptX, ptY);
+            }
             pg.endShape(CLOSE);
 
-            // --- 조형 B: 마주 보고 대칭을 이루는 하단 거대 강낭콩 쉘 ---
+            // --- 조형 B: [레퍼런스 가로 회전] 유기적으로 넘실거리는 하단 단백질 서브유닛 (+openOffset) ---
             pg.beginShape();
-            pg.vertex(-90, 30 + openOffset);
-            pg.bezierVertex(-40, 10 + openOffset, 40, 10 + openOffset, 90, 30 + openOffset);
-            pg.bezierVertex(110, 80 + openOffset, 70, 120 + openOffset, 0, 120 + openOffset);
-            pg.bezierVertex(-70, 120 + openOffset, -110, 80 + openOffset, -90, 30 + openOffset);
+            for (let i = 0; i <= 30; i++) {
+                // 오른쪽에서 출발하여 왼쪽으로 하단 곡면을 감싸 도는 역방향 궤적 파싱 (0도 ~ 180도)
+                let angle = map(i, 0, 30, 0, PI);
+                
+                // 하단 독립 파동 위상(+35) 격리 적용으로 유기체적 비정형성 극대화
+                let pNoise = noise(cos(angle) * 1.3, sin(angle) * 1.2, frameCount * 0.02 + 35) * 12;
+                
+                let rX = 135 + pNoise;
+                let rY = 75 + pNoise;
+                
+                let ptX = cos(angle) * rX;
+                // 개방 시 하단 쉘 전체가 아래쪽(Y축 양수 방향)으로 부드럽게 수평 이동
+                let ptY = sin(angle) * rY + 18 + openOffset;
+                
+                // [레퍼런스 가로 고증]: 하단 쉘 좌우 관통 홈 입구 스무딩 제어
+                if (angle > 0 && angle < 0 + 0.5) {
+                    ptY -= (35 - pNoise * 0.3); // 하단 쉘의 오른쪽 입구 홈 파내기
+                }
+                if (angle > PI - 0.5 && angle < PI) {
+                    ptY -= (35 - pNoise * 0.3); // 하단 쉘의 왼쪽 입구 홈 파내기
+                }
+                pg.vertex(ptX, ptY);
+            }
             pg.endShape(CLOSE);
 
-            pg.pop();
+            pg.pop(); 
         }
 
         // ==========================================================================
@@ -418,14 +503,27 @@
                     // 상하단 외곽 벽면 튕김
                     if (this.y < 5 || this.y > pg.height - 5) this.velY *= -1;
 
-                    // 거대화된 세포막의 물리적 두께(단백질 폭 100px)를 감안하여 마지노선 가두기벽 수치 튜닝
+                    // [영역 격리 패치]: Y축 위치에 따라 가두기 마지노선을 다르게 적용하여 단백질 침범을 원천 차단
+                    let currentLimitX = 100; // 기본 세포막 가두기 벽 (centerX 기준 100px 내측)
+
+                    // 입자의 실시간 Y위치가 단백질이 존재하는 중앙 영역(420~570)에 걸쳐있다면
+                    if (this.y > 420 && this.y < 570) {
+                        currentLimitX = 165; // 가두기 벽을 단백질 최대 폭인 165px 바깥으로 밀어내어 디펜스 행공
+                    }
+
                     if (this.type === 'B') {
-                        // 좌측 진영 형광 연두 입자는 0 영역부터 거대 막 왼쪽 경계벽(centerX - 100) 사이에서만 제한 유영
+                        // 좌측 진영 입자 처리
                         if (this.x < 5) { this.x = 5; this.velX *= -1; }
-                        if (this.x > centerX - 100) { this.x = centerX - 100; this.velX *= -1; } 
+                        if (this.x > centerX - currentLimitX) { 
+                            this.x = centerX - currentLimitX; 
+                            this.velX *= -1; 
+                        } 
                     } else {
-                        // 우측 진영 네온 바이올렛 입자는 거대 막 오른쪽 경계벽(centerX + 100)부터 우측 끝 사이에서만 유영
-                        if (this.x < centerX + 100) { this.x = centerX + 100; this.velX *= -1; }
+                        // 우측 진영 입자 처리
+                        if (this.x < centerX + currentLimitX) { 
+                            this.x = centerX + currentLimitX; 
+                            this.velX *= -1; 
+                        }
                         if (this.x > pg.width - 5) { this.x = pg.width - 5; this.velX *= -1; }
                     }
                 }
@@ -546,18 +644,18 @@
                             }
                         } 
                         else {
-                            // [수렴 그룹]: 오직 이 세포들만 거대 강낭콩 통로 구멍을 부드럽게 관통하여 교류 시작
-                            
-                            // 완전히 거대 단백질 굴곡 너머 안전 구역(중앙에서 80px 밖)으로 탈출하기 전까지 Y축 강제 홀딩
+                            // ---------------------------------------------------------
+                            // [수정 완료]: 레퍼런스 에러(damping) 해결 및 펄스 트리거 정밀화
+                            // ---------------------------------------------------------
                             let isCrossed = (this.type === 'B' && this.x > centerX + 80) || (this.type === 'A' && this.x < centerX - 80);
                             if (!isCrossed) {
-                                this.y = lerp(this.y, pg.height / 2, 0.25); // 인지질을 뚫지 않고 통로 구멍으로만 '쏙' 빠져나가게 제어
+                                this.y = lerp(this.y, pg.height / 2, 0.25); 
                             }
 
-                            // [승민님 피드백 완벽 반영]: 팍 터지지 않고 천천히 스며들듯 퍼지도록 초기 전송 속도 벡터 슬로우 튜닝
-                            if (this.velX === random(-1.3, 1.3) || abs(this.velX) < 1.0) {
-                                let angleRange = random(-QUARTER_PI, QUARTER_PI); // 부드러운 전방 분사 각도
-                                let burstSpeed = random(2.0, 3.2); // 느리고 자연스러운 삼투류 유체 속도 체계
+                            // 최초 분출 순간에만 유효하도록 속도 절댓값 마커 검사 변경 (중복 트리거 원천 차단)
+                            if (abs(this.velX) <= 1.3) {
+                                let angleRange = random(-QUARTER_PI, QUARTER_PI); 
+                                let burstSpeed = random(2.0, 3.2); 
                                 
                                 if (this.type === 'B') {
                                     this.velX = cos(angleRange) * burstSpeed;
@@ -568,7 +666,7 @@
                                 }
                             }
 
-                            // 감속 속도 및 잔잔한 유체 흐름 엔진 결합
+                            // [오타 수정]: 존재하지 않는 damping 변수를 지우고 speedFactor 위계로 통합!
                             this.x += this.velX * speedFactor;
                             this.y += this.velY * speedFactor;
 
@@ -580,14 +678,11 @@
                             if (this.y < 5) { this.y = 5; this.velY *= -1; }
                             if (this.y > pg.height - 5) { this.y = pg.height - 5; this.velY *= -1; }
 
-                            // [기획 조건 완벽 반영]: 반대편 영역 내부 공간으로 안전 진입(isCrossed)이 확인된 직후 역교류 차단 재잠금!
                             if (isCrossed) {
                                 if (this.type === 'B') {
-                                    // 원래 좌측(B)이었던 형광연두 입자는 이제 '우측 영역(centerX + 100 ~ 오른쪽 끝)'에 평생 안착 정착!
                                     if (this.x < centerX + 100) { this.x = centerX + 100; this.velX *= -1; }
                                     if (this.x > pg.width - 5) { this.x = pg.width - 5; this.velX *= -1; }
                                 } else {
-                                    // 원래 우측(A)이었던 네온바이올렛 입자는 이제 '좌측 영역(5 ~ centerX - 100)'에 평생 안착 정착!
                                     if (this.x < 5) { this.x = 5; this.velX *= -1; }
                                     if (this.x > centerX - 100) { this.x = centerX - 100; this.velX *= -1; }
                                 }
