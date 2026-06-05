@@ -78,6 +78,10 @@
         let isPhase2TimelineStarted = false; 
         let globalMembraneAlpha = 0;
 
+        // [엔딩 패치]: 10초 홀드 락 플래그 및 엔딩 페이드아웃 제어 변수 위계화
+        let isPhase4Locked = false;      // 10초 동시 터치 유지 시 true로 잠금 플래그
+        let endingFadeAlpha = 255;       // 엔딩 시 화면 전면을 은은하게 숨길 알파 제어 변수
+
         function setup() {
             createCanvas(windowWidth, windowHeight, WEBGL);
             pg = createGraphics(600, 1000);
@@ -111,17 +115,52 @@
             }
 
             // -------------------------------------------------------------
-            // [실시간 페이즈(Phase) 판별 인터랙션 구조 리팩토링]
+            // [엔딩 패치 완료]: 10초 터치 유지 락 장치 및 25초 엔딩 리셋 시스템
             // -------------------------------------------------------------
-            if (isTouchA && isTouchB) {
+            let elapsedTouch = isTouchTriggered ? (millis() - touchStartTime) : 0;
+
+            // [10초 마지노선 정밀 연산]: 4단계 진입 후 10초(10000ms) 동안 양측 모두 손을 때지 않았다면 시스템 최종 잠금 활성화
+            if (currentPhase === 4 && elapsedTouch >= 10000) {
+                isPhase4Locked = true; 
+            }
+
+            // 조건 분기 판단: (실제 두 명 다 터치 중이거나) OR (10초 강제 프리 패스 플래그가 잠겼을 때)
+            if ((isTouchA && isTouchB) || isPhase4Locked) {
                 if (!isTouchTriggered) {
                     touchStartTime = millis(); 
                     isTouchTriggered = true;
                 }
                 currentPhase = 4; 
-                isPhase2Triggered = false; // 타 페이즈 진입 시 초기화
+                isPhase2Triggered = false; 
+
+                // [25초 최종 엔딩 트리거]: 터치 유지 서사가 마침내 25초(25000ms)에 완벽하게 도달했을 때
+                if (millis() - touchStartTime >= 25000) {
+                    // 화면 전체를 부드럽게 흐려지게 만듭니다 (Linear Fade Out 보간)
+                    endingFadeAlpha = lerp(endingFadeAlpha, 0, 0.04);
+
+                    // 화면이 완전히 안개처럼 흐려져 보이지 않게 되는 마지노선 순간(알파값 5 이하)에 시스템 완전 청소 리셋
+                    if (endingFadeAlpha <= 5) {
+                        currentPhase = 1;
+                        isTouchTriggered = false;
+                        isPhase4Locked = false; // 락 해제
+                        isPhase2TimelineStarted = false;
+                        globalMembraneAlpha = 0;
+                        endingFadeAlpha = 255; // 알파 원복
+                        particles = []; // 유영하던 기존 입자 찌꺼기 버퍼 전면 청소 소멸
+                        
+                        // 하드웨어 가상 토글 버튼 인프라도 자동으로 강제 OFF 스위칭
+                        isTouchA = false; isTouchB = false;
+                        const btnA = document.getElementById('touch-mock-btn-a');
+                        const btnB = document.getElementById('touch-mock-btn-b');
+                        if (btnA) { btnA.innerText = "TOUCH A OFF"; btnA.className = "off"; btnA.style.backgroundColor = "transparent"; btnA.style.color = "#FFB6C1"; }
+                        if (btnB) { btnB.innerText = "TOUCH B OFF"; btnB.className = "off"; btnB.style.backgroundColor = "transparent"; btnB.style.color = "#FFB6C1"; }
+                    }
+                }
             } else {
+                // 10초를 채우지 못하고 손을 떼어버린 낙아웃 상황일 때는 철저하게 초기화 리셋
                 isTouchTriggered = false; 
+                isPhase4Locked = false;
+                endingFadeAlpha = 255;
                 
                 if (currentDistA <= THRESHOLD_DISTANCE && currentDistB <= THRESHOLD_DISTANCE) {
                     currentPhase = 3;
@@ -129,7 +168,6 @@
                 } 
                 else if (currentDistA <= START_DISTANCE && currentDistB <= START_DISTANCE) {
                     currentPhase = 2; 
-                    // [변경]: 두 명 다 150cm 안에 들어온 '최초의 순간'에만 마스터 타이머 스냅샷 기록
                     if (!isPhase2TimelineStarted) {
                         phase2StartTime = millis();
                         isPhase2TimelineStarted = true;
@@ -137,8 +175,8 @@
                 } 
                 else {
                     currentPhase = 1; 
-                    isPhase2TimelineStarted = false; // 이탈 시 타임라인 가동 초기화
-                    globalMembraneAlpha = 0;         // 세포막 알파 초기화
+                    isPhase2TimelineStarted = false;
+                    globalMembraneAlpha = 0;         
                 }
             }
 
@@ -284,6 +322,10 @@
             // -------------------------------------------------------------
             background(0); 
             noStroke();
+
+            // [엔딩 패치]: 25초 엔딩 리셋 시 화면 전체 캔버스의 투명도를 안개처럼 녹아내리게 제어
+            tint(255, endingFadeAlpha);
+            
             texture(pg); 
             
             beginShape(QUADS);
