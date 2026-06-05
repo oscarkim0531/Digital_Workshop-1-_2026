@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Membrane Project - Mapping System Base</title>
+    <link rel="stylesheet" href="./style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.js"></script>
+</head>
+<body>
+
+    <button id="connect-btn">Connect System</button>
+
+    <div id="debug-controller">
+        <div class="control-group">
+            <label for="dist-slider">가상 거리 제어 (cm)</label>
+            <input type="range" id="dist-slider" min="0" max="200" value="200">
+            <span id="dist-value">200 cm</span>
+        </div>
+        
+        <div class="control-group">
+            <label>정전식 터치 시뮬레이션</label>
+            <button id="touch-mock-btn" class="off">TOUCH OFF</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 매핑 시스템 제어를 위한 전역 변수 ---
+        let pg;               
+        let corners = [];     
+        let selectedCorner = -1; 
+        let isMappingMode = true; 
+
+        // 하드웨어 조정용 변수 기본 세팅 (현장 튜닝 가능)
+        const START_DISTANCE = 150;         // 관객 감지 시작 거리 (150cm)
+        const THRESHOLD_DISTANCE = 50;      // 세포막 등장 및 포화 시작 임계점 (50cm)
+        const MAX_CLOSE_DISTANCE = 15;      // 최종 밀착 최단 거리 (15cm)
+        const TOUCH_HOLD_TIME = 2500;       // 통로 완전 개방까지 필요한 시간 (2.5초)
+
+        // --- 디자인 에셋 전역 컬러 팔레트 위계화 ---
+        const CLR_HEAD_HUE = '#87CEEB';     // 인지질 머리 기본 하늘색
+        const CLR_HEAD_CORE = '#E0FFFF';    // 인지질 머리 중심 연한 하늘색
+        const CLR_TAIL = '#90EE90';         // 인지질 꼬리 연두색
+        const CLR_PROTEIN = '#FFB6C1';      // 막 단백질 핑크빛 붉은색
+        
+        // 입자 고유 고대비 네온 컬러 지정
+        const CLR_PARTICLE_A = '#D500F9';   // 우측 진영 관객 A (네온 바이올렛)
+        const CLR_PARTICLE_B = '#D0EE17';   // 좌측 진영 관객 B (형광 연두)
+
+        // 하드웨어 입력값 시뮬레이션용 실시간 변수
+        let currentDistA = 200;  
+        let currentDistB = 200;  
+        let isTouchA = false;    
+        let isTouchB = false;    
+
+        // 시스템 상태 및 타이머 제어 변수
+        let currentPhase = 1;               // 1: 대기, 2: 진입 및 안내, 3: 임계점 포화, 4: 터치 확산
+        let touchStartTime = 0;  
+        let isTouchTriggered = false; 
+
+        // 그래픽 에셋 데이터 구조
+        let particles = [];      
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight, WEBGL);
+            pg = createGraphics(600, 1000);
+
+            pg.textAlign(CENTER, CENTER);
+            pg.textFont('sans-serif');
+
+            corners = [
+                createVector(-200, -350), 
+                createVector(200, -350),  
+                createVector(200, 350),   
+                createVector(-200, 350)   
+            ];
+
+            document.getElementById('connect-btn').addEventListener('click', connectSerial);
+
+            const distSlider = document.getElementById('dist-slider');
+            const distValueText = document.getElementById('dist-value');
+            const touchBtn = document.getElementById('touch-mock-btn');
+
+            distSlider.addEventListener('input', (e) => {
+                let val = Number(e.target.value);
+                distValueText.innerText = val + " cm";
+                currentDistA = val;
+                currentDistB = val;
+            });
+
+            touchBtn.addEventListener('click', () => {
+                if (!isTouchA || !isTouchB) {
+                    isTouchA = true;
+                    isTouchB = true;
+                    touchBtn.innerText = "TOUCH ON";
+                    touchBtn.className = "on";
+                } else {
+                    isTouchA = false;
+                    isTouchB = false;
+                    touchBtn.innerText = "TOUCH OFF";
+                    touchBtn.className = "off";
+                }
+            });
+        }
+
+        function draw() {
+            // -------------------------------------------------------------
+            // [STEP 1] 가상 도화지(pg) 채우기
+            // -------------------------------------------------------------
+            if (isMappingMode) {
+                pg.background(40); 
+                pg.stroke(255, 30);
+                pg.strokeWeight(1);
+                pg.line(0, 0, pg.width, pg.height);
+                pg.line(pg.width, 0, 0, pg.height);
+            } else {
+                pg.background(0); 
+            }
+
+            // -------------------------------------------------------------
+            // [실시간 페이즈(Phase) 판별 인터랙션 구조]
+            // -------------------------------------------------------------
+            if (isTouchA && isTouchB) {
+                if (!isTouchTriggered) {
+                    touchStartTime = millis(); 
+                    isTouchTriggered = true;
+                }
+                currentPhase = 4; 
+            } else {
+                isTouchTriggered = false; 
+                if (currentDistA <= THRESHOLD_DISTANCE && currentDistB <= THRESHOLD_DISTANCE) {
+                    currentPhase = 3; 
+                } else if (currentDistA <= START_DISTANCE && currentDistB <= START_DISTANCE) {
+                    currentPhase = 2; 
+                } else {
+                    currentPhase = 1; 
+                }
+            }
+
+            // -------------------------------------------------------------
+            // [비주얼 연출 파트 1: 텍스트 레이어 가이드 위계화]
+            // -------------------------------------------------------------
+            if (currentPhase === 1) {
+                let textA = (currentDistA <= START_DISTANCE) ? "READY" : "바닥의 표시까지 가까이 와주세요.";
+                let textB = (currentDistB <= START_DISTANCE) ? "READY" : "바닥의 표시까지 가까이 와주세요.";
+
+                pg.push();
+                pg.translate(pg.width / 2, pg.height * 0.45); 
+                pg.fill(255);
+                pg.noStroke();
+                pg.textSize(22);
+                pg.text(textB, 0, 0);
+                pg.pop();
+
+                pg.push();
+                pg.translate(pg.width / 2, pg.height * 0.55); 
+                pg.scale(-1, 1); 
+                pg.fill(255);
+                pg.noStroke();
+                pg.textSize(22);
+                pg.text(textA, 0, 0);
+                pg.pop();
+            } 
+
+            // -------------------------------------------------------------
+            // [비주얼 연출 파트 2: 세로형 인지질 이중층 및 단백질 통로 구현]
+            // -------------------------------------------------------------
+            if (currentPhase >= 2) {
+                pg.push();
+                let membraneAlpha = (currentPhase === 2) ? 120 : 255; 
+                let centerX = pg.width / 2;
+
+                drawMembraneWithVolume(membraneAlpha);
+
+                drawChannelProtein(centerX, 250, currentPhase); 
+                drawChannelProtein(centerX, 650, currentPhase); 
+                pg.pop();
+            }
+
+            // -------------------------------------------------------------
+            // [비주얼 연출 파트 3: 가리비형 반원 세포 입자 시뮬레이션]
+            // -------------------------------------------------------------
+            if (currentPhase >= 2) {
+                let avgDist = (currentDistA + currentDistB) / 2;
+                let targetCount = map(avgDist, THRESHOLD_DISTANCE, START_DISTANCE, 250, 20);
+                targetCount = constrain(targetCount, 20, 300);
+
+                while (particles.length < targetCount) {
+                    let isLeft = random() > 0.5;
+                    particles.push(new ScallopCell(
+                        isLeft ? random(0, 40) : random(pg.width - 40, pg.width), 
+                        random(0, pg.height),
+                        isLeft ? 'B' : 'A' 
+                    ));
+                }
+
+                if (particles.length > targetCount && currentPhase === 2) {
+                    particles.splice(0, particles.length - targetCount);
+                }
+
+                for (let p of particles) {
+                    p.update(currentPhase);
+                    p.display();
+                }
+            }
+
+            // -------------------------------------------------------------
+            // [STEP 2] 메인 화면에 가상 도화지를 텍스처로 매핑하여 왜곡 투사
+            // -------------------------------------------------------------
+            background(0); 
+            noStroke();
+            texture(pg); 
+            
+            beginShape(QUADS);
+            textureMode(NORMAL);
+            vertex(corners[0].x, corners[0].y, 0, 0, 0); 
+            vertex(corners[1].x, corners[1].y, 0, 1, 0); 
+            vertex(corners[2].x, corners[2].y, 0, 1, 1); 
+            vertex(corners[3].x, corners[3].y, 0, 0, 1); 
+            endShape();
+
+            // -------------------------------------------------------------
+            // [STEP 3] 매핑 세팅 모드일 때 시각 가이드라인 및 조절 핀 연출
+            // -------------------------------------------------------------
+            if (isMappingMode) {
+                stroke(0, 255, 0);
+                strokeWeight(1.5);
+                noFill();
+                beginShape();
+                vertex(corners[0].x, corners[0].y);
+                vertex(corners[1].x, corners[1].y);
+                vertex(corners[2].x, corners[2].y);
+                vertex(corners[3].x, corners[3].y);
+                endShape(CLOSE);
+
+                for (let i = 0; i < 4; i++) {
+                    fill(0, 255, 0);
+                    noStroke();
+                    ellipse(corners[i].x, corners[i].y, 16, 16);
+                }
+            }
+        }
+
+        // --- [문법 에러 정정] draw() 함수 밖으로 독립 분리 완료 ---
+        function drawMembraneWithVolume(membraneAlpha) {
+            let centerX = pg.width / 2;
+
+            for (let y = 0; y <= pg.height; y += 15) {
+                if ((y > 190 && y < 310) || (y > 590 && y < 710)) continue;
+
+                let yOffset = sin(y * 0.05 + frameCount * 0.03) * 3;
+
+                pg.push();
+                pg.stroke(144, 238, 144, membraneAlpha * 0.7); 
+                pg.strokeWeight(1.5);
+                pg.line(centerX - 15 + yOffset, y, centerX - 1 + yOffset, y);
+                pg.line(centerX + 15 + yOffset, y, centerX + 1 + yOffset, y);
+                pg.pop();
+
+                let cholesterolNoise = noise(y * 0.1);
+                if (cholesterolNoise > 0.68) {
+                    pg.push();
+                    pg.noStroke();
+                    pg.fill(226, 176, 126, membraneAlpha * 0.8); 
+                    let sideOffset = (cholesterolNoise > 0.8) ? -8 : 8;
+                    pg.ellipse(centerX + sideOffset + yOffset, y - 7, 5, 8);
+                    pg.pop();
+                }
+
+                pg.push();
+                pg.noStroke();
+                pg.translate(centerX - 15 + yOffset, y);
+                pg.fill(135, 206, 235, membraneAlpha); 
+                pg.ellipse(0, 0, 10, 10);
+                pg.fill(224, 255, 255, membraneAlpha); 
+                pg.ellipse(0, 0, 6, 6);
+                pg.fill(255, membraneAlpha * 0.5); 
+                pg.ellipse(-2, -2, 2, 2); 
+                pg.pop();
+
+                pg.push();
+                pg.noStroke();
+                pg.translate(centerX + 15 + yOffset, y);
+                pg.fill(135, 206, 235, membraneAlpha); 
+                pg.ellipse(0, 0, 10, 10);
+                pg.fill(224, 255, 255, membraneAlpha); 
+                pg.ellipse(0, 0, 6, 6);
+                pg.fill(255, membraneAlpha * 0.5); 
+                pg.ellipse(-2, -2, 2, 2); 
+                pg.pop();
+            }
+        }
+
+        // Web Serial API 아두이노 실시간 데이터 파싱 및 매핑 인터랙션 함수
+        async function connectSerial() {
+            try {
+                const port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 9600 }); 
+                document.getElementById('connect-btn').style.display = 'none';
+                
+                const textDecoder = new TextDecoderStream();
+                const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+                const inputStream = textDecoder.readable;
+                const reader = inputStream.getReader();
+
+                let buffer = "";
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    if (value) {
+                        buffer += value;
+                        let lines = buffer.split("\n");
+                        buffer = lines.pop(); 
+
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (line.length > 0) {
+                                let data = line.split(" ");
+                                if (data.length === 2) {
+                                    currentDistA = Number(data[0]);
+                                    currentDistB = Number(data[1]);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("시리얼 포트 연결 실패:", error);
+                alert("하드웨어 연결에 실패했습니다.");
+            }
+        }
+
+        // --- 마우스 드래그 인터랙션 제어 ---
+        function mousePressed() {
+            if (!isMappingMode) return;
+            let mx = mouseX - width / 2;
+            let my = mouseY - height / 2;
+            for (let i = 0; i < 4; i++) {
+                let d = dist(mx, my, corners[i].x, corners[i].y);
+                if (d < 20) {
+                    selectedCorner = i;
+                    break;
+                }
+            }
+        }
+
+        function mouseDragged() {
+            if (selectedCorner !== -1) {
+                corners[selectedCorner].x = mouseX - width / 2;
+                corners[selectedCorner].y = mouseY - height / 2;
+            }
+        }
+
+        function mouseReleased() {
+            selectedCorner = -1; 
+        }
+
+        function keyPressed() {
+            if (key === 'm' || key === 'M') {
+                isMappingMode = !isMappingMode;
+            }
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+
+        // 세로형 입체 통로 단백질 드로잉 함수
+        function drawChannelProtein(x, y, phase) {
+            pg.push();
+            pg.translate(x, y);
+            pg.fill(255, 182, 193, 240); 
+            pg.stroke(224, 255, 255, 200); 
+            pg.strokeWeight(2.5);
+
+            let openOffset = 0;
+            if (phase === 4) {
+                let elapsed = millis() - touchStartTime;
+                openOffset = map(elapsed, 0, TOUCH_HOLD_TIME, 0, 40);
+                openOffset = constrain(openOffset, 0, 40);
+            }
+
+            pg.beginShape();
+            pg.vertex(-45, -20 - openOffset);
+            pg.bezierVertex(-20, -5 - openOffset, 20, -5 - openOffset, 45, -20 - openOffset);
+            pg.bezierVertex(55, -45 - openOffset, 35, -65 - openOffset, 0, -65 - openOffset);
+            pg.bezierVertex(-35, -65 - openOffset, -55, -45 - openOffset, -45, -20 - openOffset);
+            pg.endShape(CLOSE);
+
+            pg.beginShape();
+            pg.vertex(-45, 20 + openOffset);
+            pg.bezierVertex(-20, 5 + openOffset, 20, 5 + openOffset, 45, 20 + openOffset);
+            pg.bezierVertex(55, 45 + openOffset, 35, 65 + openOffset, 0, 65 + openOffset);
+            pg.bezierVertex(-35, 65 + openOffset, -55, 45 + openOffset, -45, 20 + openOffset);
+            pg.endShape(CLOSE);
+
+            pg.pop();
+        }
+
+        // 가리비형 반원 세포 클래스
+        class ScallopCell {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type; 
+                this.color = (type === 'A') ? CLR_PARTICLE_A : CLR_PARTICLE_B; // 상수 위계 동기화 완료
+                this.baseSize = random(5, 11);
+                this.noiseSeed = random(100);
+                
+                this.velX = random(-1.5, 1.5);
+                this.velY = random(-1.5, 1.5);
+
+                // 0: 수렴 및 장벽 관통 그룹, 1: 독립 유영 그룹
+                this.group = random() > 0.5 ? 0 : 1; 
+            }
+
+            update(phase) {
+                let centerX = pg.width / 2;
+
+                if (phase === 2) {
+                    this.x += this.velX;
+                    this.y += this.velY;
+
+                    if (this.y < 0 || this.y > pg.height) this.velY *= -1;
+                    if (this.type === 'B') {
+                        if (this.x < 0) { this.x = 0; this.velX *= -1; }
+                        if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; } 
+                    } else {
+                        if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                        if (this.x > pg.width) { this.x = pg.width; this.velX *= -1; }
+                    }
+                } 
+
+                else if (phase === 3) {
+                    if (this.group === 1) {
+                        this.x += this.velX;
+                        this.y += this.velY;
+                        if (this.y < 0 || this.y > pg.height) this.velY *= -1;
+                        if (this.type === 'B') {
+                            if (this.x < 0) { this.x = 0; this.velX *= -1; }
+                            if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; } 
+                        } else {
+                            if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                            if (this.x > pg.width) { this.x = pg.width; this.velX *= -1; }
+                        }
+                    } 
+                    else {
+                        let avgDist = (currentDistA + currentDistB) / 2;
+                        let lerpFactor = map(avgDist, 20, THRESHOLD_DISTANCE, 0.05, 0.008);
+                        lerpFactor = constrain(lerpFactor, 0.008, 0.05);
+
+                        let baseTargetY = (this.y < pg.height / 2) ? 250 : 650;
+                        let angleSeed = this.noiseSeed * 123.45 % TWO_PI;
+                        
+                        let ellipseRadiusX = random(5, 15);
+                        let ellipseRadiusY = random(-40, 40);
+
+                        let targetX, targetY;
+                        if (this.type === 'B') {
+                            targetX = (centerX - 55) - abs(cos(angleSeed) * ellipseRadiusX);
+                            targetY = baseTargetY + ellipseRadiusY;
+                        } else {
+                            targetX = (centerX + 55) + abs(cos(angleSeed) * ellipseRadiusX);
+                            targetY = baseTargetY + ellipseRadiusY;
+                        }
+
+                        let breathEffectX = sin(frameCount * 0.05 + this.noiseSeed) * 2;
+                        let breathEffectY = cos(frameCount * 0.05 + this.noiseSeed) * 3;
+
+                        this.x = lerp(this.x, targetX + breathEffectX, lerpFactor);
+                        this.y = lerp(this.y, targetY + breathEffectY, lerpFactor);
+                    }
+                }
+
+                else if (phase === 4) {
+                    let elapsed = millis() - touchStartTime;
+                    
+                    if (elapsed < TOUCH_HOLD_TIME) {
+                        if (this.group === 1) {
+                            this.x += this.velX;
+                            this.y += this.velY;
+                            if (this.y < 0 || this.y > pg.height) this.velY *= -1;
+                            if (this.type === 'B') {
+                                if (this.x < 0) { this.x = 0; this.velX *= -1; }
+                                if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; } 
+                            } else {
+                                if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                                if (this.x > pg.width) { this.x = pg.width; this.velX *= -1; }
+                            }
+                        } 
+                        else {
+                            let targetX = centerX;
+                            let targetY = (this.y < pg.height / 2) ? 250 : 650;
+                            this.x = lerp(this.x, targetX, 0.06);
+                            this.y = lerp(this.y, targetY, 0.06);
+                        }
+                    }
+                    else {
+                        // --- [수정 완료] 폭발 템포 감속 및 교류 차단 재정착 연산 부하 마감 ---
+                        let burstElapsed = elapsed - TOUCH_HOLD_TIME; 
+                        let speedFactor = exp(-burstElapsed * 0.0008); 
+
+                        if (this.group === 1) {
+                            this.x += this.velX * speedFactor;
+                            this.y += this.velY * speedFactor;
+
+                            let flowScale = 0.004;
+                            let flowAngle = noise(this.x * flowScale, this.y * flowScale, frameCount * 0.012) * TWO_PI * 2;
+                            this.x += cos(flowAngle) * 0.4;
+                            this.y += sin(flowAngle) * 0.4;
+
+                            if (this.y < 5) { this.y = 5; this.velY *= -1; }
+                            if (this.y > pg.height - 5) { this.y = pg.height - 5; this.velY *= -1; }
+                            
+                            if (this.type === 'B') {
+                                if (this.x < 5) { this.x = 5; this.velX *= -1; }
+                                if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; }
+                            } else {
+                                if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                                if (this.x > pg.width - 5) { this.x = pg.width - 5; this.velX *= -1; }
+                            }
+                        } 
+                        else {
+                            // 완전히 강낭콩 통로 굴곡을 지나 반대편 안전 지대로 탈출하기 전까지 궤도 강제 고정
+                            let isCrossed = (this.type === 'B' && this.x > centerX + 50) || (this.type === 'A' && this.x < centerX - 50);
+                            if (!isCrossed) {
+                                let targetY = (this.y < pg.height / 2) ? 250 : 650;
+                                this.y = lerp(this.y, targetY, 0.25); 
+                            }
+
+                            if (this.velX === random(-1.5, 1.5) || abs(this.velX) < 1.5) {
+                                let angleRange = random(-QUARTER_PI, QUARTER_PI); 
+                                let burstSpeed = random(2.0, 3.5); // [승민님 피드백] 부드럽고 우아한 확산 속도 안착
+                                
+                                if (this.type === 'B') {
+                                    this.velX = cos(angleRange) * burstSpeed;
+                                    this.velY = sin(angleRange) * burstSpeed;
+                                } else {
+                                    this.velX = -cos(angleRange) * burstSpeed;
+                                    this.velY = sin(angleRange) * burstSpeed;
+                                }
+                            }
+
+                            this.x += this.velX * speedFactor;
+                            this.y += this.velY * speedFactor;
+
+                            let flowScale = 0.004;
+                            let flowAngle = noise(this.x * flowScale, this.y * flowScale, frameCount * 0.01) * TWO_PI * 2;
+                            this.x += cos(flowAngle) * 0.5;
+                            this.y += sin(flowAngle) * 0.5;
+
+                            if (this.y < 5) { this.y = 5; this.velY *= -1; }
+                            if (this.y > pg.height - 5) { this.y = pg.height - 5; this.velY *= -1; }
+
+                            // [독립성 보정 완료] 반대편 영역 내부 공간으로 완벽 탈출이 확인된 시점(isCrossed) 이후에만 재잠금 활성화!
+                            if (isCrossed) {
+                                if (this.type === 'B') {
+                                    if (this.x < centerX + 50) { this.x = centerX + 50; this.velX *= -1; }
+                                    if (this.x > pg.width - 5) { this.x = pg.width - 5; this.velX *= -1; }
+                                } else {
+                                    if (this.x < 5) { this.x = 5; this.velX *= -1; }
+                                    if (this.x > centerX - 50) { this.x = centerX - 50; this.velX *= -1; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            display() {
+                pg.push();
+                pg.translate(this.x, this.y);
+                
+                let angle = atan2(this.velY, this.velX);
+                if (this.type === 'A') angle += PI;
+                pg.rotate(angle);
+                
+                pg.noStroke();
+                
+                // --- 레이어 1: 입자 외곽 베이스 (형광 고유 컬러 + 알파 투명도 적용) ---
+                pg.fill(this.color + 'CC'); 
+                pg.beginShape();
+                let resolution = 8;
+                for (let i = 0; i <= resolution; i++) {
+                    let a = map(i, 0, resolution, -HALF_PI, HALF_PI);
+                    let rDeform = this.baseSize + noise(this.noiseSeed + frameCount * 0.03) * 4;
+                    let xOffset = cos(a) * rDeform;
+                    let yOffset = sin(a) * rDeform;
+                    pg.curveVertex(xOffset, yOffset);
+                }
+                pg.vertex(-this.baseSize * 0.3, this.baseSize);
+                pg.vertex(-this.baseSize * 0.3, -this.baseSize);
+                pg.endShape(CLOSE);
+
+                // --- [버그 수정 완료] 레이어 2: 내부 입체 코어 그라데이션 (중첩 pop 버그 정정) ---
+                pg.fill(224, 255, 255, 170); // CLR_HEAD_CORE 톤의 맑은 코어 매칭
+                pg.beginShape();
+                for (let i = 0; i <= resolution; i++) {
+                    let a = map(i, 0, resolution, -HALF_PI, HALF_PI);
+                    let rInner = (this.baseSize * 0.6) + noise(this.noiseSeed + 10 + frameCount * 0.03) * 2;
+                    let xOffset = cos(a) * rInner;
+                    let yOffset = sin(a) * rInner;
+                    pg.curveVertex(xOffset, yOffset);
+                }
+                pg.vertex(-this.baseSize * 0.18, this.baseSize * 0.6);
+                pg.vertex(-this.baseSize * 0.18, -this.baseSize * 0.6);
+                pg.endShape(CLOSE);
+
+                pg.pop(); // 드로잉 스택을 여기서 단 한 번 정갈하게 닫아줍니다.
+            }
+        }
+    </script>
+</body>
+</html>
