@@ -82,6 +82,9 @@
         let isPhase4Locked = false;      // 10초 동시 터치 유지 시 true로 잠금 플래그
         let endingFadeAlpha = 255;       // 엔딩 시 화면 전면을 은은하게 숨길 알파 제어 변수
 
+        let outGlowRatio = 0;
+        let outTimeline = 0;
+
         function setup() {
             createCanvas(windowWidth, windowHeight, WEBGL);
             pg = createGraphics(600, 1000);
@@ -133,8 +136,19 @@
                 currentPhase = 4; 
                 isPhase2Triggered = false; 
 
+                let touchDuration = millis() - touchStartTime;
+                if (touchDuration >= 20000 && touchDuration < 25000) {
+                    // 20초일 때는 0, 25초 최종 마감일 때는 1.0까지 선형 보간 상승
+                    outGlowRatio = map(touchDuration, 20000, 25000, 0, 1.0);
+                } else if (touchDuration < 20000) {
+                    outGlowRatio = 0; // 20초 전에는 철저히 순정 상태 유지
+                }
+
                 // [25초 최종 엔딩 트리거]: 터치 유지 서사가 마침내 25초(25000ms)에 완벽하게 도달했을 때
-                if (millis() - touchStartTime >= 25000) {
+                if (touchDuration >= 25000) {
+                    // 리셋 직전에는 발광 1.0 풀 고정
+                    outGlowRatio = 1.0; 
+                    
                     // 화면 전체를 부드럽게 흐려지게 만듭니다 (Linear Fade Out 보간)
                     endingFadeAlpha = lerp(endingFadeAlpha, 0, 0.04);
 
@@ -244,34 +258,71 @@
                     pg.ellipse(centerX, pg.height / 2, pointSize * 2.8, pointSize * 2.8);
                     pg.pop();
                 }
-                // [구간 3] 7.5초 ~ 9.5초 [모션 격리]: 2초 동안 정중앙에서 상하 테두리로 뻗어 나가며 선을 완성하는 시퀀스
+                // [구간 3] 7.5초 ~ 9.5초: 2초 동안 정중앙에서 상하로 뻗어 나가며 '동시에 파동이 차오르는' 시퀀스
                 else if (timelineElapsed >= 7500 && timelineElapsed < 9500) {
                     let lineProgress = (timelineElapsed - 7500) / 2000;
                     let slowExtend = sin(lineProgress * HALF_PI); // 부드러운 감속 확장
                     let lineExtendY = map(slowExtend, 0, 1, 0, pg.height / 2);
                     
-                    pg.push(); pg.stroke(255); pg.strokeWeight(3.5);
-                    pg.line(centerX, pg.height / 2, centerX, pg.height / 2 - lineExtendY);
-                    pg.line(centerX, pg.height / 2, centerX, pg.height / 2 + lineExtendY);
+                    // [핵심 디벨롭]: 9.5초 진입 시 팍 튀는 것을 막기 위해, 선이 뻗어 나가는 동안 
+                    // 파동의 진폭 가중치를 0에서부터 점진적으로 증가시킵니다. (0.0 -> 1.0)
+                    let transitionRatio = slowExtend; 
+
+                    pg.push();
+                    pg.noFill();
+                    let resolution = 15;
+
+                    // [구간 4]의 3중 구조와 형태적 위계를 완벽히 싱크하기 위해, 뻗어나가는 단계부터 3중 레이어로 드로잉합니다.
+                    // 레이어 ①: 파동선 확장용 후광 블러 (Glow) -> transitionRatio에 따라 투명도와 진폭이 0에서 점차 강해짐
+                    pg.stroke(180, 245, 255, map(transitionRatio, 0, 1, 0, 70)); 
+                    pg.strokeWeight(16);
+                    pg.beginShape();
+                    // 전체 height를 다 그리는 게 아니라, 실시간으로 확장 중인 lineExtendY 영역 안에서만 파동을 그리도록 루프 제한
+                    for(let ly = pg.height/2 - lineExtendY; ly <= pg.height/2 + lineExtendY; ly += resolution) {
+                        let macroWave = sin(ly * 0.003 + frameCount * 0.025) * (32 * transitionRatio); 
+                        let microTremor = (noise(ly * 0.05, frameCount * 0.02) - 0.5) * (8 * transitionRatio);
+                        pg.vertex(centerX + macroWave + microTremor, ly);
+                    }
+                    pg.endShape();
+
+                    // 레이어 ②: 중간 선형 보간 블러
+                    pg.stroke(135, 206, 235, map(transitionRatio, 0, 1, 0, 140)); 
+                    pg.strokeWeight(8);
+                    pg.beginShape();
+                    for(let ly = pg.height/2 - lineExtendY; ly <= pg.height/2 + lineExtendY; ly += resolution) {
+                        let midWave = sin(ly * 0.003 + frameCount * 0.025 + 0.1) * (22 * transitionRatio); 
+                        midWave += (noise(ly * 0.05, frameCount * 0.02 + 10) - 0.5) * (5 * transitionRatio);
+                        pg.vertex(centerX + midWave, ly);
+                    }
+                    pg.endShape();
+
+                    // 레이어 ③: 순백색 코어 중심선
+                    pg.stroke(255); 
+                    pg.strokeWeight(4);
+                    pg.beginShape();
+                    for(let ly = pg.height/2 - lineExtendY; ly <= pg.height/2 + lineExtendY; ly += resolution) {
+                        let coreWave = sin(ly * 0.003 + frameCount * 0.025 + 0.05) * (20 * transitionRatio); 
+                        coreWave += (noise(ly * 0.05, frameCount * 0.02 + 20) - 0.5) * (3 * transitionRatio);
+                        pg.vertex(centerX + coreWave, ly);
+                    }
+                    pg.endShape();
                     pg.pop();
                 }
-                // [구간 4] 9.5초 ~ 15.0초 [지시사항 반영]: 5.5초 동안 제자리에서 좌우로 크게 꿀렁이다가 서서히 소멸하는 단계
+                // [구간 4] 9.5초 ~ 15.0초: 5.5초 동안 전체 화면 크기(0~height)로 이미 완성된 고진폭 파동이 정갈하게 꿀렁이는 단계
                 else if (timelineElapsed >= 9500 && timelineElapsed < 15000) {
                     pg.push();
                     pg.noFill();
                     
-                    // [정밀 소멸 보간 연산]: 5.5초 구간 중, 후반부 1.5초(13.5초~15.0초) 동안 선들의 투명도를 서서히 0으로 수렴시킴
                     let currentLineAlpha = 255;
                     if (timelineElapsed >= 13500) {
                         currentLineAlpha = map(timelineElapsed, 13500, 15000, 255, 0);
                     }
                     
-                    let resolution = 15; // 세로 마디 간격
+                    let resolution = 15; 
 
-                    // 레이어 ①: 다중 오버랩 후광 블러 (Glow)
-                    // [진폭 스케일업]: 넘실거림 진폭 가중치를 기존 14에서 32로 2배 이상 키워 좌우 무브먼트를 극대화
+                    // 레이어 ①: 완벽히 충전된 후광 블러 (Glow) -> 구간 3의 끝점 치수(32px, 16px 두께)를 부드럽게 상속받음
                     pg.stroke(180, 245, 255, map(currentLineAlpha, 0, 255, 0, 70)); 
-                    pg.strokeWeight(16); // 블러 후광을 조금 더 풍성하게 두께 스케일업
+                    pg.strokeWeight(16); 
                     pg.beginShape();
                     for(let ly = 0; ly <= pg.height; ly += resolution) {
                         let macroWave = sin(ly * 0.003 + frameCount * 0.025) * 32; 
@@ -312,16 +363,16 @@
                     let guideAlpha = map(timelineElapsed, 15800, 16600, 0, 255);
                     guideAlpha = constrain(guideAlpha, 0, 255);
                     pg.push(); pg.fill(255, guideAlpha); pg.noStroke(); pg.textSize(22);
-                    pg.push(); pg.translate(centerX, pg.height * 0.25); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
-                    pg.push(); pg.translate(centerX, pg.height * 0.75); pg.scale(-1, 1); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
+                    pg.push(); pg.translate(centerX, pg.height * 0.45); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
+                    pg.push(); pg.translate(centerX, pg.height * 0.55); pg.scale(-1, 1); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
                     pg.pop();
                 }
                 // [구간 7] 18.0초 ~ 18.8초 [위계 교정]: 안내 문구가 서서히 소멸하며 다시 짧은 암전 형성
                 else if (timelineElapsed >= 18000 && timelineElapsed < 18800) {
                     let guideAlpha = map(timelineElapsed, 18000, 18800, 255, 0);
                     pg.push(); pg.fill(255, guideAlpha); pg.noStroke(); pg.textSize(22);
-                    pg.push(); pg.translate(centerX, pg.height * 0.25); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
-                    pg.push(); pg.translate(centerX, pg.height * 0.75); pg.scale(-1, 1); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
+                    pg.push(); pg.translate(centerX, pg.height * 0.45); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
+                    pg.push(); pg.translate(centerX, pg.height * 0.55); pg.scale(-1, 1); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
                     pg.pop();
                 }
                 // [구간 8] 18.8초 ~ 19.5초 [위계 교정]: 완벽한 공백 상태에서 세포막 조직이 0.7초간 부드럽게 페이드인 (面)
@@ -516,24 +567,26 @@
                 pg.push();
                 pg.noStroke();
                 pg.translate(leftX, y);
-                pg.fill(100, 180, 220, membraneAlpha); // 1 레이어 외곽: 깊은 시안 하늘색으로 입체 경계벽 형성
-                pg.ellipse(0, 0, headSize, headSize);
-                pg.fill(180, 245, 255, membraneAlpha); // 2 레이어 중간: 전이 영역 보간
-                pg.ellipse(0, 0, headSize * 0.65, headSize * 0.75);
-                pg.fill(240, 255, 255, membraneAlpha); // 3 레이어 코어: 현미경 광학 하이라이트 중심점
-                pg.ellipse(-headSize * 0.18, -headSize * 0.18, headSize * 0.3, headSize * 0.3);
+                
+                // [아웃트로 패치]: 20초 이후 순백색 생체 발광 시프팅 컬러 보간 연산
+                // 오리지널 시안색 컬러들을 기점으로, outGlowRatio에 따라 맑은 화이트 파스텔 톤으로 부드럽게 시프트
+                let headC1 = lerpColor(color(100, 180, 220, membraneAlpha), color(255, 245, 247, membraneAlpha), outGlowRatio); // 외곽
+                let headC2 = lerpColor(color(180, 245, 255, membraneAlpha), color(255, 255, 255, membraneAlpha), outGlowRatio); // 중간
+                let headC3 = lerpColor(color(240, 255, 255, membraneAlpha), color(255, 255, 255, membraneAlpha), outGlowRatio); // 하이라이트 코어
+
+                pg.fill(headC1); pg.ellipse(0, 0, headSize, headSize);
+                pg.fill(headC2); pg.ellipse(0, 0, headSize * 0.65, headSize * 0.75);
+                pg.fill(headC3); pg.ellipse(-headSize * 0.18, -headSize * 0.18, headSize * 0.3, headSize * 0.3);
                 pg.pop();
 
                 // --- 조형 4: 오른쪽 그라데이션 인지질 머리 (Sphere Fake Shading 공학 기법) ---
                 pg.push();
                 pg.noStroke();
                 pg.translate(rightX, y);
-                pg.fill(100, 180, 220, membraneAlpha); 
-                pg.ellipse(0, 0, headSize, headSize);
-                pg.fill(180, 245, 255, membraneAlpha); 
-                pg.ellipse(0, 0, headSize * 0.65, headSize * 0.75);
-                pg.fill(240, 255, 255, membraneAlpha); 
-                pg.ellipse(-headSize * 0.18, -headSize * 0.18, headSize * 0.3, headSize * 0.3);
+                // 오른쪽 머리도 동일한 발광 컬러 위계 대입
+                pg.fill(headC1); pg.ellipse(0, 0, headSize, headSize);
+                pg.fill(headC2); pg.ellipse(0, 0, headSize * 0.65, headSize * 0.75);
+                pg.fill(headC3); pg.ellipse(-headSize * 0.18, -headSize * 0.18, headSize * 0.3, headSize * 0.3);
                 pg.pop();
             }
         }
@@ -566,14 +619,25 @@
                 pg.push();
                 
                 if (layer === 0) {
-                    // 메인 단백질 바디: 레퍼런스 고유의 맑고 리퀴드한 핑크빛 레드 톤
-                    pg.fill(255, 165, 180, 245); 
-                    // [교정]: 과했던 흰색 스트로크를 반투명한 로즈 시안 톤으로 얇고 부드럽게 스무딩 마감
-                    pg.stroke(255, 210, 220, 160); 
+                    // [아웃트로 패치]: 오리지널 핑크 레드에서 20초 후 화사한 순백색 로즈 화이트 파스텔로 컬러 보간
+                    let origBodyColor = color(255, 165, 180, 245);
+                    let glowBodyColor = color(255, 235, 240, 250); // 고밀도 로즈 화이트
+                    let targetBody = lerpColor(origBodyColor, glowBodyColor, outGlowRatio);
+                    
+                    let origStrokeColor = color(255, 210, 220, 160);
+                    let glowStrokeColor = color(255, 255, 255, 200);
+                    let targetStroke = lerpColor(origStrokeColor, glowStrokeColor, outGlowRatio);
+
+                    pg.fill(targetBody); 
+                    pg.stroke(targetStroke); 
                     pg.strokeWeight(2.0); 
                 } else {
-                    // 내부 은은한 하이라이트: 단백질의 매끄러운 굴곡(볼륨감)만 유도하는 소프트 핑크 레이어
-                    pg.fill(255, 215, 225, 220);
+                    // 내부 은은한 하이라이트 볼륨층 컬러 보간
+                    let origCoreColor = color(255, 215, 225, 220);
+                    let glowCoreColor = color(255, 255, 255, 255); // 풀 하이라이트 순백
+                    let targetCore = lerpColor(origCoreColor, glowCoreColor, outGlowRatio);
+
+                    pg.fill(targetCore);
                     pg.noStroke();
                 }
 
