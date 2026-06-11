@@ -1140,14 +1140,32 @@
                             line = line.trim();
                             if (line.length > 0) {
                                 let data = line.split(" ");
-                                if (data.length === 2) {
-                                    let val1 = Number(data[0]);
-                                    let val2 = Number(data[1]);
-                                    if(val1 === 10 && val2 === 10) {
-                                        isTouchA = true; isTouchB = true;
-                                    } else {
-                                        isTouchA = false; isTouchB = false;
-                                        currentDistA = val1; currentDistB = val2;
+                                
+                                // [수리 핵심]: 아두이노 패킷 프로토콜 위계 분석 (구분자, 거리, 터치여부 -> 총 3개 단어)
+                                if (data.length === 3) {
+                                    let idHeader = data[0];       // 'A' 또는 'B' 식별자
+                                    let readingVal = Number(data[1]); // 실제 거리 수치
+                                    let isTouchOn = Number(data[2]);  // 터치 상태 (1 또는 0)
+
+                                    // --- 플레이어 A 아두이노 포트 신호 정밀 맵핑 ---
+                                    if (idHeader === 'A' || idHeader === 'a') {
+                                        if (isTouchOn === 1) {
+                                            isTouchA = true;
+                                            currentDistA = 0; // 터치 시 거리를 0으로 즉각 매핑하여 시스템 모순 방지
+                                        } else {
+                                            isTouchA = false;
+                                            currentDistA = readingVal; // 순정 실시간 거리값 복구
+                                        }
+                                    }
+                                    // --- 플레이어 B 아두이노 포트 신호 정밀 맵핑 ---
+                                    else if (idHeader === 'B' || idHeader === 'b') {
+                                        if (isTouchOn === 1) {
+                                            isTouchB = true;
+                                            currentDistB = 0; // 터치 시 거리 동시 압착
+                                        } else {
+                                            isTouchB = false;
+                                            currentDistB = readingVal;
+                                        }
                                     }
                                 }
                             }
@@ -1194,10 +1212,20 @@
                     btnA.innerText = "TOUCH A ON";
                     btnA.style.backgroundColor = "#D500F9";
                     btnA.style.color = "#000000";
+                    
+                    // [디버그 UI 패치]: 터치가 ON되는 순간 거리값 변수와 슬라이더 밸류를 강제로 0 정렬하여 논리 모순 해결
+                    currentDistA = 0; 
+                    sliderA.value = 0;
+                    valueA.innerText = "0 cm";
                 } else {
                     btnA.innerText = "TOUCH A OFF";
                     btnA.style.backgroundColor = "transparent";
                     btnA.style.color = "#FFB6C1";
+                    
+                    // 터치가 해제되면 기본 대기 거리(200cm)로 원복 격리
+                    currentDistA = 200;
+                    sliderA.value = 200;
+                    valueA.innerText = "200 cm";
                 }
             });
 
@@ -1208,10 +1236,19 @@
                     btnB.innerText = "TOUCH B ON";
                     btnB.style.backgroundColor = "#D0EE17";
                     btnB.style.color = "#000000";
+                    
+                    // [디버그 UI 패치]: 터치가 ON되는 순간 거리값 변수와 슬라이더 밸류를 강제로 0 정렬하여 논리 모순 해결
+                    currentDistB = 0;
+                    sliderB.value = 0;
+                    valueB.innerText = "0 cm";
                 } else {
                     btnB.innerText = "TOUCH B OFF";
                     btnB.style.backgroundColor = "transparent";
                     btnB.style.color = "#FFB6C1";
+                    
+                    currentDistB = 200;
+                    sliderB.value = 200;
+                    valueB.innerText = "200 cm";
                 }
             });
         }
