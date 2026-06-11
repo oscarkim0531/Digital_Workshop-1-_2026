@@ -1115,65 +1115,98 @@
         }
 
         // ==========================================================================
-        // 7. 하드웨어 웹 시리얼 및 디버깅 UI 헬퍼 연동
+        // 🔬 [하드웨어 인프라 교정]: 2개 아두이노 포트 동시 페어링 및 병렬 파싱 엔진
         // ==========================================================================
         async function connectSerial() {
             try {
-                const port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 9600 }); 
-                document.getElementById('connect-btn').style.display = 'none';
+                // ------------------------------------------------------------------
+                // [PORT 1]: 첫 번째 아두이노 보드 페어링 개통 (예: PLAYER A)
+                // ------------------------------------------------------------------
+                alert("첫 번째 아두이노 보드(PLAYER A)를 선택해 주세요.");
+                const port1 = await navigator.serial.requestPort();
+                await port1.open({ baudRate: 9600 });
                 
-                const textDecoder = new TextDecoderStream();
-                const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
-                const inputStream = textDecoder.readable;
-                const reader = inputStream.getReader();
+                const decoder1 = new TextDecoderStream();
+                port1.readable.pipeTo(decoder1.writable);
+                const reader1 = decoder1.readable.getReader();
 
-                let buffer = "";
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    if (value) {
-                        buffer += value;
-                        let lines = buffer.split("\n");
-                        buffer = lines.pop(); 
-                        for (let line of lines) {
-                            line = line.trim();
-                            if (line.length > 0) {
-                                let data = line.split(" ");
-                                
-                                // [수리 핵심]: 아두이노 패킷 프로토콜 위계 분석 (구분자, 거리, 터치여부 -> 총 3개 단어)
-                                if (data.length === 3) {
-                                    let idHeader = data[0];       // 'A' 또는 'B' 식별자
-                                    let readingVal = Number(data[1]); // 실제 거리 수치
-                                    let isTouchOn = Number(data[2]);  // 터치 상태 (1 또는 0)
+                // ------------------------------------------------------------------
+                // [PORT 2]: 두 번째 아두이노 보드 페어링 개통 (예: PLAYER B)
+                // ------------------------------------------------------------------
+                alert("이어서 두 번째 아두이노 보드(PLAYER B)를 선택해 주세요.");
+                const port2 = await navigator.serial.requestPort();
+                await port2.open({ baudRate: 9600 });
+                
+                const decoder2 = new TextDecoderStream();
+                port2.readable.pipeTo(decoder2.writable);
+                const reader2 = decoder2.readable.getReader();
 
-                                    // --- 플레이어 A 아두이노 포트 신호 정밀 맵핑 ---
-                                    if (idHeader === 'A' || idHeader === 'a') {
-                                        if (isTouchOn === 1) {
-                                            isTouchA = true;
-                                            currentDistA = 0; // 터치 시 거리를 0으로 즉각 매핑하여 시스템 모순 방지
-                                        } else {
-                                            isTouchA = false;
-                                            currentDistA = readingVal; // 순정 실시간 거리값 복구
-                                        }
-                                    }
-                                    // --- 플레이어 B 아두이노 포트 신호 정밀 맵핑 ---
-                                    else if (idHeader === 'B' || idHeader === 'b') {
-                                        if (isTouchOn === 1) {
-                                            isTouchB = true;
-                                            currentDistB = 0; // 터치 시 거리 동시 압착
-                                        } else {
-                                            isTouchB = false;
-                                            currentDistB = readingVal;
-                                        }
-                                    }
-                                }
+                // 두 보드가 무사히 개통되면 화면에서 커넥트 버튼을 깔끔하게 숨김 처리
+                document.getElementById('connect-btn').style.display = 'none';
+                alert("모든 하드웨어 시스템이 무결점으로 동기화되었습니다! 전시를 시작합니다.");
+
+                // ------------------------------------------------------------------
+                // [병렬 수신 코어]: 데이터 분석 및 변수 매핑 처리 함수 (내부 가드 서브 루틴)
+                // ------------------------------------------------------------------
+                function parseSerialLine(line) {
+                    let trimmed = line.trim();
+                    if (trimmed.length > 0) {
+                        let data = trimmed.split(" ");
+                        if (data.length === 3) {
+                            let idHeader = data[0];
+                            let readingVal = Number(data[1]);
+                            let isTouchOn = Number(data[2]);
+
+                            // 관객 A 진영 데이터 실시간 매핑
+                            if (idHeader === 'A' || idHeader === 'a') {
+                                if (isTouchOn === 1) { isTouchA = true; currentDistA = 0; } 
+                                else { isTouchA = false; currentDistA = readingVal; }
+                            }
+                            // 관객 B 진영 데이터 실시간 매핑
+                            else if (idHeader === 'B' || idHeader === 'b') {
+                                if (isTouchOn === 1) { isTouchB = true; currentDistB = 0; } 
+                                else { isTouchB = false; currentDistB = readingVal; }
                             }
                         }
                     }
                 }
+
+                // ------------------------------------------------------------------
+                // [독립 비동기 루프]: 포트 1번과 2번의 데이터를 실시간으로 가로채는 독립 스레드 가동
+                // ------------------------------------------------------------------
+                // 아두이노 A(1번) 비동기 스트림 감시 루프
+                (async () => {
+                    let buffer1 = "";
+                    while (true) {
+                        const { value, done } = await reader1.read();
+                        if (done) break;
+                        if (value) {
+                            buffer1 += value;
+                            let lines = buffer1.split("\n");
+                            buffer1 = lines.pop();
+                            for (let line of lines) { parseSerialLine(line); }
+                        }
+                    }
+                })();
+
+                // 아두이노 B(2번) 비동기 스트림 감시 루프
+                (async () => {
+                    let buffer2 = "";
+                    while (true) {
+                        const { value, done } = await reader2.read();
+                        if (done) break;
+                        if (value) {
+                            buffer2 += value;
+                            let lines = buffer2.split("\n");
+                            buffer2 = lines.pop();
+                            for (let line of lines) { parseSerialLine(line); }
+                        }
+                    }
+                })();
+
             } catch (error) {
-                console.error("시리얼 연결 실패:", error);
+                console.error("다원 시리얼 포트 연동 실패:", error);
+                alert("연결이 취소되었거나 포트 개방에 실패했습니다. 다시 시도해 주세요.");
             }
         }
 
