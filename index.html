@@ -189,8 +189,8 @@
             centralMembraneWave += (noise(500 * 0.02, frameCount * 0.01) - 0.5) * 8;
 
             if (currentPhase === 1) {
-                let textA = (currentDistA <= START_DISTANCE) ? "READY" : "바닥의 표시까지 가까이 와주세요.";
-                let textB = (currentDistB <= START_DISTANCE) ? "READY" : "바닥의 표시까지 가까이 와주세요.";
+                let textA = (currentDistA <= START_DISTANCE) ? "READY" : "바닥의 표시선까지 와서 대기해 주세요.";
+                let textB = (currentDistB <= START_DISTANCE) ? "READY" : "바닥의 표시선까지 와서 대기해 주세요.";
 
                 // [교정 완료]: PLAYER B 가이드 텍스트 색상 채우기(fill) 문법을 분리 정돈하여 노란색(형광연두) READY 가 칼같이 출력되도록 보정
                 pg.push();
@@ -229,29 +229,108 @@
                     pg.push(); pg.translate(centerX, pg.height * 0.55); pg.scale(-1, 1); pg.fill(213, 0, 249, readyAlpha); pg.text("READY", 0, 0); pg.pop();
                     pg.pop();
                 }
-                // [구간 2] 1.5초 ~ 4.5초: '천천히 가까이 걸어오세요' 가 부드럽게 나타나서 2초간 선명히 홀드
-                else if (timelineElapsed >= 1500 && timelineElapsed < 4500) {
-                    let guideAlpha = (timelineElapsed < 2500) ? map(timelineElapsed, 1500, 2500, 0, 255) : 255;
+                // [구간 2] 1.5초 ~ 7.5초: 6초 동안 정확히 3번 웅왕웅왕 수축 이완하는 코어 점 (승민 님 고유 수치 보존)
+                else if (timelineElapsed >= 1500 && timelineElapsed < 7500) {
+                    let pointAlpha = map(timelineElapsed, 1500, 2500, 0, 255);
+                    let progress = (timelineElapsed - 1500) / 6000;
+                    let waveAngle = progress * TWO_PI * 3;
+                    let breatheMotion = (sin(waveAngle - HALF_PI) + 1) * 4; 
+                    let pointSize = 12 + breatheMotion; 
+                    
+                    pg.push(); pg.noStroke();
+                    pg.fill(255, pointAlpha);
+                    pg.ellipse(centerX, pg.height / 2, pointSize, pointSize);
+                    pg.fill(240, 255, 255, pointAlpha * 0.35); 
+                    pg.ellipse(centerX, pg.height / 2, pointSize * 2.8, pointSize * 2.8);
+                    pg.pop();
+                }
+                // [구간 3] 7.5초 ~ 9.5초 [모션 격리]: 2초 동안 정중앙에서 상하 테두리로 뻗어 나가며 선을 완성하는 시퀀스
+                else if (timelineElapsed >= 7500 && timelineElapsed < 9500) {
+                    let lineProgress = (timelineElapsed - 7500) / 2000;
+                    let slowExtend = sin(lineProgress * HALF_PI); // 부드러운 감속 확장
+                    let lineExtendY = map(slowExtend, 0, 1, 0, pg.height / 2);
+                    
+                    pg.push(); pg.stroke(255); pg.strokeWeight(3.5);
+                    pg.line(centerX, pg.height / 2, centerX, pg.height / 2 - lineExtendY);
+                    pg.line(centerX, pg.height / 2, centerX, pg.height / 2 + lineExtendY);
+                    pg.pop();
+                }
+                // [구간 4] 9.5초 ~ 15.0초 [지시사항 반영]: 5.5초 동안 제자리에서 좌우로 크게 꿀렁이다가 서서히 소멸하는 단계
+                else if (timelineElapsed >= 9500 && timelineElapsed < 15000) {
+                    pg.push();
+                    pg.noFill();
+                    
+                    // [정밀 소멸 보간 연산]: 5.5초 구간 중, 후반부 1.5초(13.5초~15.0초) 동안 선들의 투명도를 서서히 0으로 수렴시킴
+                    let currentLineAlpha = 255;
+                    if (timelineElapsed >= 13500) {
+                        currentLineAlpha = map(timelineElapsed, 13500, 15000, 255, 0);
+                    }
+                    
+                    let resolution = 15; // 세로 마디 간격
+
+                    // 레이어 ①: 다중 오버랩 후광 블러 (Glow)
+                    // [진폭 스케일업]: 넘실거림 진폭 가중치를 기존 14에서 32로 2배 이상 키워 좌우 무브먼트를 극대화
+                    pg.stroke(180, 245, 255, map(currentLineAlpha, 0, 255, 0, 70)); 
+                    pg.strokeWeight(16); // 블러 후광을 조금 더 풍성하게 두께 스케일업
+                    pg.beginShape();
+                    for(let ly = 0; ly <= pg.height; ly += resolution) {
+                        let macroWave = sin(ly * 0.003 + frameCount * 0.025) * 32; 
+                        let microTremor = (noise(ly * 0.05, frameCount * 0.02) - 0.5) * 8;
+                        pg.vertex(centerX + macroWave + microTremor, ly);
+                    }
+                    pg.endShape();
+
+                    // 레이어 ②: 중간 선형 보간 블러
+                    pg.stroke(135, 206, 235, map(currentLineAlpha, 0, 255, 0, 140)); 
+                    pg.strokeWeight(8); 
+                    pg.beginShape();
+                    for(let ly = 0; ly <= pg.height; ly += resolution) {
+                        let midWave = sin(ly * 0.003 + frameCount * 0.025 + 0.1) * 22; 
+                        midWave += (noise(ly * 0.05, frameCount * 0.02 + 10) - 0.5) * 5;
+                        pg.vertex(centerX + midWave, ly);
+                    }
+                    pg.endShape();
+
+                    // 레이어 ③: 순백색 코어 중심 파동 선
+                    pg.stroke(255, currentLineAlpha); 
+                    pg.strokeWeight(4); 
+                    pg.beginShape();
+                    for(let ly = 0; ly <= pg.height; ly += resolution) {
+                        let coreWave = sin(ly * 0.003 + frameCount * 0.025 + 0.05) * 20; 
+                        coreWave += (noise(ly * 0.05, frameCount * 0.02 + 20) - 0.5) * 3;
+                        pg.vertex(centerX + coreWave, ly);
+                    }
+                    pg.endShape();
+                    pg.pop();
+                }
+                // [구간 5] 15.0초 ~ 15.8초 [위계 교정]: 선이 부드럽게 완전 소멸한 후 찾아오는 깊은 암전의 정적 (0.8초)
+                else if (timelineElapsed >= 15000 && timelineElapsed < 15800) {
+                    // 가상 도화지를 깨끗이 비워 선의 소멸 잔상 여운 유도
+                }
+                // [구간 6] 15.8초 ~ 18.0초 [위계 교정]: 깊은 암전 정적 속에서 가이드 문구 선명하게 로드
+                else if (timelineElapsed >= 15800 && timelineElapsed < 18000) {
+                    let guideAlpha = map(timelineElapsed, 15800, 16600, 0, 255);
+                    guideAlpha = constrain(guideAlpha, 0, 255);
                     pg.push(); pg.fill(255, guideAlpha); pg.noStroke(); pg.textSize(22);
                     pg.push(); pg.translate(centerX, pg.height * 0.25); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
                     pg.push(); pg.translate(centerX, pg.height * 0.75); pg.scale(-1, 1); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
                     pg.pop();
                 }
-                // [구간 3] 4.5초 ~ 6.0초: 안내 문구가 서서히 투명해지며 소멸
-                else if (timelineElapsed >= 4500 && timelineElapsed < 6000) {
-                    let guideAlpha = map(timelineElapsed, 4500, 6000, 255, 0);
+                // [구간 7] 18.0초 ~ 18.8초 [위계 교정]: 안내 문구가 서서히 소멸하며 다시 짧은 암전 형성
+                else if (timelineElapsed >= 18000 && timelineElapsed < 18800) {
+                    let guideAlpha = map(timelineElapsed, 18000, 18800, 255, 0);
                     pg.push(); pg.fill(255, guideAlpha); pg.noStroke(); pg.textSize(22);
                     pg.push(); pg.translate(centerX, pg.height * 0.25); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
                     pg.push(); pg.translate(centerX, pg.height * 0.75); pg.scale(-1, 1); pg.text("천천히 가까이 걸어오세요.", 0, 0); pg.pop();
                     pg.pop();
                 }
-                // [구간 4] 6.0초 ~ 6.7초 [지시사항 반영]: 암전 없이 가이드가 끝나자마자 즉각 0.7초 동안 투명도를 선형 보간하여 등장
-                else if (timelineElapsed >= 6000 && timelineElapsed < 6700) {
+                // [구간 8] 18.8초 ~ 19.5초 [위계 교정]: 완벽한 공백 상태에서 세포막 조직이 0.7초간 부드럽게 페이드인 (面)
+                else if (timelineElapsed >= 18800 && timelineElapsed < 19500) {
                     showMembrane = true;
-                    globalMembraneAlpha = map(timelineElapsed, 6000, 6700, 0, 140); 
+                    globalMembraneAlpha = map(timelineElapsed, 18800, 19500, 0, 140);
                 }
-                // [구간 5] 6.7초 이후: 페이드인이 완료된 은은한 제한 알파값으로 세포막 형태 유지
-                else if (timelineElapsed >= 6700) {
+                // [구간 9] 19.5초 이후: 인트로 빌드업 최종 종결, 2단계 세포막 상시 유영 활성화
+                else if (timelineElapsed >= 19500) {
                     showMembrane = true;
                     globalMembraneAlpha = 140; 
                 }
@@ -280,7 +359,7 @@
             if (currentPhase === 2) {
                 let timelineElapsed = millis() - phase2StartTime;
                 // 안내 문구 서사가 모두 끝나고 세포막이 페이드인 시작하는 6초(6000ms) 이후부터만 입자 활성화
-                if (timelineElapsed >= 6000) {
+                if (timelineElapsed >= 19500) {
                     canStartParticles = true;
                 }
             } else if (currentPhase >= 3) {
@@ -481,62 +560,95 @@
             // p5.js 표준 라디안 제어 상수 계산
             let halfOfPi = HALF_PI;
 
-            // --- 조형 A: [레퍼런스 가로 회전] 유기적으로 넘실거리는 상단 단백질 서브유닛 (-openOffset) ---
+            // --- 위계 1: 매끄러운 생체 볼륨을 형성하는 메인 베이스 쉘 ( layer = 0 ) ---
+            // 두 번의 루프만 돌며 외곽 덩어리와 내부 은은한 광학 볼륨만 남겨 과함을 원천 차단합니다.
+            for (let layer = 0; layer < 2; layer++) {
+                pg.push();
+                
+                if (layer === 0) {
+                    // 메인 단백질 바디: 레퍼런스 고유의 맑고 리퀴드한 핑크빛 레드 톤
+                    pg.fill(255, 165, 180, 245); 
+                    // [교정]: 과했던 흰색 스트로크를 반투명한 로즈 시안 톤으로 얇고 부드럽게 스무딩 마감
+                    pg.stroke(255, 210, 220, 160); 
+                    pg.strokeWeight(2.0); 
+                } else {
+                    // 내부 은은한 하이라이트: 단백질의 매끄러운 굴곡(볼륨감)만 유도하는 소프트 핑크 레이어
+                    pg.fill(255, 215, 225, 220);
+                    pg.noStroke();
+                }
+
+                // 2중 레이어 구조에 맞춘 기하학적 수축 비례 및 부드러운 오프셋 정렬
+                let sizeScaleX = map(layer, 0, 1, 1.0, 0.82);
+                let sizeScaleY = map(layer, 0, 1, 1.0, 0.75);
+                let yOffsetShift = map(layer, 0, 1, 0, 4); // 하이라이트 맺힘점을 위로 미세 이동
+
+                // --- 조형 A: 가로 넘실거리는 상단 단백질 서브유닛 ---
+                pg.beginShape();
+                for (let i = 0; i <= 30; i++) {
+                    let angle = map(i, 0, 30, PI, TWO_PI);
+                    let pNoise = noise(cos(angle) * 1.3, sin(angle) * 1.2, frameCount * 0.02) * 12;
+                    
+                    let rX = (135 + pNoise) * sizeScaleX; 
+                    let rY = (75 + pNoise) * sizeScaleY; 
+                    
+                    let ptX = cos(angle) * rX;
+                    let ptY = sin(angle) * rY - 18 - openOffset + yOffsetShift;
+                    
+                    if (angle > PI && angle < PI + 0.5) ptY += ((35 - pNoise * 0.3) * sizeScaleY);
+                    if (angle > TWO_PI - 0.5 && angle < TWO_PI) ptY += ((35 - pNoise * 0.3) * sizeScaleY);
+                    pg.vertex(ptX, ptY);
+                }
+                // CLOSE를 활용해 외곽 면 구조를 단정하게 차단 마감
+                pg.endShape(CLOSE);
+
+                // --- 조형 B: 가로 넘실거리는 하단 단백질 서브유닛 ---
+                pg.beginShape();
+                for (let i = 0; i <= 30; i++) {
+                    let angle = map(i, 0, 30, 0, PI);
+                    let pNoise = noise(cos(angle) * 1.3, sin(angle) * 1.2, frameCount * 0.02 + 35) * 12;
+                    
+                    let rX = (135 + pNoise) * sizeScaleX;
+                    let rY = (75 + pNoise) * sizeScaleY;
+                    
+                    let ptX = cos(angle) * rX;
+                    let ptY = sin(angle) * rY + 18 + openOffset - yOffsetShift; 
+                    
+                    if (angle > 0 && angle < 0 + 0.5) ptY -= ((35 - pNoise * 0.3) * sizeScaleY);
+                    if (angle > PI - 0.5 && angle < PI) ptY -= ((35 - pNoise * 0.3) * sizeScaleY);
+                    pg.vertex(ptX, ptY);
+                }
+                pg.endShape(CLOSE);
+                
+                pg.pop();
+            }
+
+            // --- 위계 2: 관통 홈 입구의 최소한의 깊이감만 유지하는 소프트 림 라이트 (Lumen Line) ---
+            // 복잡한 다중 선을 지우고, 입자가 진입할 통로의 경계 핏만 얇게 마감합니다.
+            pg.push();
+            pg.noFill();
+            pg.stroke(255, 235, 240, 160); 
+            pg.strokeWeight(1.8);
+            
+            // 상단 좌측 홈 내벽 굴곡
             pg.beginShape();
-            for (let i = 0; i <= 30; i++) {
-                // 호를 그리며 왼쪽에서 오른쪽으로 상단 곡면을 타고 도는 좌표계 파싱 (180도 ~ 360도)
-                let angle = map(i, 0, 30, PI, TWO_PI);
-                
-                // 외곽선이 굳어있지 않고 세포막 결을 따라 일렁이도록 독립 노이즈 펄싱 매립
-                let pNoise = noise(cos(angle) * 1.3, sin(angle) * 1.2, frameCount * 0.02) * 12;
-                
-                // [조형 찌그러짐 전면 해결]: 장폭과 단폭의 비례를 리밸런싱하여 웅장하고 매끄러운 쉘 형태 도출
-                let rX = 135 + pNoise; 
-                let rY = 75 + pNoise; 
-                
-                let ptX = cos(angle) * rX;
-                // 개방 시 상단 쉘 전체가 위쪽(Y축 음수 방향)으로 부드럽게 수평 이동
-                let ptY = sin(angle) * rY - 18 - openOffset;
-                
-                // [레퍼런스 가로 고증]: 좌우 진영을 잇는 가로형 관통 홈(Horizontal Pore) 입구 스무딩 제어
-                if (angle > PI && angle < PI + 0.5) {
-                    ptY += (35 - pNoise * 0.3); // 상단 쉘의 왼쪽 입구 홈 파내기
-                }
-                if (angle > TWO_PI - 0.5 && angle < TWO_PI) {
-                    ptY += (35 - pNoise * 0.3); // 상단 쉘의 오른쪽 입구 홈 파내기
-                }
+            for (let i = 0; i <= 15; i++) {
+                let angle = map(i, 0, 15, PI, PI + HALF_PI);
+                let ptX = cos(angle) * 128;
+                let ptY = sin(angle) * 68 - 18 - openOffset + (35 * 0.65);
                 pg.vertex(ptX, ptY);
             }
-            pg.endShape(CLOSE);
-
-            // --- 조형 B: [레퍼런스 가로 회전] 유기적으로 넘실거리는 하단 단백질 서브유닛 (+openOffset) ---
+            pg.endShape();
+            
+            // 상단 우측 홈 내벽 굴곡
             pg.beginShape();
-            for (let i = 0; i <= 30; i++) {
-                // 오른쪽에서 출발하여 왼쪽으로 하단 곡면을 감싸 도는 역방향 궤적 파싱 (0도 ~ 180도)
-                let angle = map(i, 0, 30, 0, PI);
-                
-                // 하단 독립 파동 위상(+35) 격리 적용으로 유기체적 비정형성 극대화
-                let pNoise = noise(cos(angle) * 1.3, sin(angle) * 1.2, frameCount * 0.02 + 35) * 12;
-                
-                let rX = 135 + pNoise;
-                let rY = 75 + pNoise;
-                
-                let ptX = cos(angle) * rX;
-                // 개방 시 하단 쉘 전체가 아래쪽(Y축 양수 방향)으로 부드럽게 수평 이동
-                let ptY = sin(angle) * rY + 18 + openOffset;
-                
-                // [레퍼런스 가로 고증]: 하단 쉘 좌우 관통 홈 입구 스무딩 제어
-                if (angle > 0 && angle < 0 + 0.5) {
-                    ptY -= (35 - pNoise * 0.3); // 하단 쉘의 오른쪽 입구 홈 파내기
-                }
-                if (angle > PI - 0.5 && angle < PI) {
-                    ptY -= (35 - pNoise * 0.3); // 하단 쉘의 왼쪽 입구 홈 파내기
-                }
+            for (let i = 0; i <= 15; i++) {
+                let angle = map(i, 0, 15, TWO_PI - HALF_PI, TWO_PI);
+                let ptX = cos(angle) * 128;
+                let ptY = sin(angle) * 68 - 18 - openOffset + (35 * 0.65);
                 pg.vertex(ptX, ptY);
             }
-            pg.endShape(CLOSE);
-
-            pg.pop(); 
+            pg.endShape();
+            pg.pop();
         }
 
         // ==========================================================================
