@@ -88,6 +88,12 @@
         let outGlowRatio = 0;
         let outTimeline = 0;
 
+        // [개별 레디 고정 패치]: 플레이어별 독립 1초 타이머 및 고정 플래그
+        let readyTimerA = 0;
+        let readyTimerB = 0;
+        let isReadyLockedA = false;
+        let isReadyLockedB = false;
+
         function setup() {
             createCanvas(windowWidth, windowHeight, WEBGL);
             pg = createGraphics(600, 1000);
@@ -109,6 +115,54 @@
         }
 
         function draw() {
+            // ----------------------------------------------------------------------
+            // 🔬 [개별 레디 고정 엔진]: 아두이노 로우 데이터 위계 검증 및 실시간 락(Lock)
+            // ----------------------------------------------------------------------
+            
+            // --- [PLAYER A (우측)] 1초 검증 및 가변 상한선 보정 ---
+            if (currentDistA <= START_DISTANCE) {
+                if (!isReadyLockedA) {
+                    if (readyTimerA === 0) {
+                        readyTimerA = millis(); // 150cm 이내 최초 진입 프레임 시각 포착
+                    } else if (millis() - readyTimerA >= 1000) {
+                        isReadyLockedA = true;  // 1초 유지 성공 시 락 온
+                    }
+                }
+            } else {
+                // 1초를 채우지 못하고 이탈한 경우에만 노이즈로 판단하고 타이머 리셋
+                if (!isReadyLockedA) readyTimerA = 0;
+            }
+
+            // [핵심 교정 위계 A]: 1초 검증이 완료된 관객에 한하여 거리 필터링 작동
+            if (isReadyLockedA) {
+                // 실제 측정값이 140cm보다 클 때만(멀어지거나 튈 때만) 140cm로 고정 가드하고,
+                // 140cm보다 더 가까이 다가오는 실제 런타임 밀착 수치는 그대로 프리패스 상속합니다.
+                if (currentDistA > 140) {
+                    currentDistA = 140;
+                }
+            }
+
+
+            // --- [PLAYER B (좌측)] 1초 검증 및 가변 상한선 보정 ---
+            if (currentDistB <= START_DISTANCE) {
+                if (!isReadyLockedB) {
+                    if (readyTimerB === 0) {
+                        readyTimerB = millis();
+                    } else if (millis() - readyTimerB >= 1000) {
+                        isReadyLockedB = true;
+                    }
+                }
+            } else {
+                if (!isReadyLockedB) readyTimerB = 0;
+            }
+
+            // [핵심 교정 위계 B]: 플레이어 B 진영도 동일한 가변 상한선 가드 프로토콜 매립
+            if (isReadyLockedB) {
+                if (currentDistB > 140) {
+                    currentDistB = 140;
+                }
+            }
+
             // [교정 핵심 위계 확보]: 아웃트로 수식 및 텍스트 레이아웃에서 centerX를 안전하게 상시 참조하도록 draw 최상단 배치
             let centerX = pg.width / 2;
 
@@ -136,8 +190,8 @@
             }
 
             // 조건 분기 판단: (실제 두 명 다 터치 중이거나) OR (10초 강제 프리 패스 플래그가 잠겼을 때)
-            if ((isTouchA && isTouchB) || isPhase4Locked) {
-                if (!isTouchTriggered) {
+                if (((isTouchA && isTouchB) && isReadyLockedA && isReadyLockedB) || isPhase4Locked) {
+                    if (!isTouchTriggered) {
                     touchStartTime = millis(); 
                     isTouchTriggered = true;
                 }
@@ -151,7 +205,7 @@
                 // ==========================================================================
                 
                 // 1. [상시 구간]: 터치 후 0초 ~ 20초 전반부 동안은 100% 풀 선명도의 오리지널 세포막/단백질 유지 렌더링
-                if (touchDuration < 20000) {
+                if (touchDuration < 10000) {
                     globalMembraneAlpha = 255; 
                     pg.push();
                     // 동적 노이즈 파동 변수 상속 연산
@@ -163,9 +217,9 @@
                     pg.pop();
                 }
 
-                // 2. [아웃트로 구간]: 대망의 20초 평형 도달 순간부터 총 12초(12000ms) 동안 역순 서사 가동
-                if (touchDuration >= 20000 && touchDuration < 32000) {
-                    outTimeline = touchDuration - 20000; // 0ms ~ 12000ms까지 독립 시간축
+                // 2. [아웃트로 구간]: 대망의 10초 평형 도달 순간부터 총 12초(12000ms) 동안 역순 서사 가동
+                if (touchDuration >= 10000 && touchDuration < 22000) {
+                    outTimeline = touchDuration - 10000; // 0ms ~ 12000ms까지 독립 시간축
                     
                     let centralMembraneWave = sin(500 * 0.003 + frameCount * 0.025) * 40;
                     centralMembraneWave += (noise(500 * 0.02, frameCount * 0.01) - 0.5) * 8;
@@ -192,7 +246,7 @@
 
                         // [조형 정정 핵심 1]: 4초 전체 동안 흐느적거리지 않고, 초반 1.5초(아웃트로 1.5s~3.0s) 동안 
                         // 세포막 면 구조를 안개처럼 완전히 빛 속으로 녹여내려 소멸(Dissolve)시킵니다.
-                        let membraneFadeAlpha = map(outTimeline, 1500, 3000, 255, 0);
+                        let membraneFadeAlpha = map(outTimeline, 1500, 3500, 255, 0);
                         membraneFadeAlpha = constrain(membraneFadeAlpha, 0, 255);
 
                         // [조형 정정 핵심 2]: 투명도가 0보다 클 때만 (즉, 완벽히 사라지기 전인 아웃트로 3초 전까지만) 세포막 세트 렌더링
@@ -208,7 +262,7 @@
                         }
 
                         // [3중 파동선 복구]: 세포막 면이 완전히 증발하여 청소되는 것과 동시에 파동선 위계 백프로 개통
-                        let lineAlpha = map(outTimeline, 1500, 3000, 0, 255); 
+                        let lineAlpha = map(outTimeline, 2500, 5500, 0, 255); 
                         lineAlpha = constrain(lineAlpha, 0, 255);
                         
                         pg.push(); pg.noFill(); let resolution = 15;
@@ -304,7 +358,7 @@
                 }
 
                 // [안전 격리 완료]: 32초 최종 마감 리셋 락 장치를 4단계 스코프 안쪽 마지노선으로 정렬 안착
-                if (touchDuration >= 32000) {
+                if (touchDuration >= 22000) {
                     endingFadeAlpha = lerp(endingFadeAlpha, 0, 0.15); 
 
                     if (endingFadeAlpha <= 5) {
@@ -316,12 +370,22 @@
                         endingFadeAlpha = 255; 
                         outTimeline = 0; 
                         particles = []; 
-                        
-                        isTouchA = false; isTouchB = false;
-                        const btnA = document.getElementById('touch-mock-btn-a');
-                        const btnB = document.getElementById('touch-mock-btn-b');
-                        if (btnA) { btnA.innerText = "TOUCH A OFF"; btnA.className = "off"; btnA.style.backgroundColor = "transparent"; btnA.style.color = "#FFB6C1"; }
-                        if (btnB) { btnB.innerText = "TOUCH B OFF"; btnB.className = "off"; btnB.style.backgroundColor = "transparent"; btnB.style.color = "#FFB6C1"; }
+
+                        // 🎯 [무한 루프 방지 패치]: 물리/가상 입력 변수 자체를 대기 기준 사양으로 강제 청소
+                        isTouchA = false; 
+                        isTouchB = false;
+                        currentDistA = 200; 
+                        currentDistB = 200;
+
+                        // 🎯 [디버그 UI 동기화]: 10초 리셋 후 가상 컨트롤러 슬라이더 바 수치까지 원점 200으로 원복
+                        const sliderA = document.getElementById('dist-slider-a');
+                        const sliderB = document.getElementById('dist-slider-b');
+                        const valueA = document.getElementById('dist-value-a');
+                        const valueB = document.getElementById('dist-value-b');
+                        if (sliderA) sliderA.value = 200;
+                        if (sliderB) sliderB.value = 200;
+                        if (valueA) valueA.innerText = "200 cm";
+                        if (valueB) valueB.innerText = "200 cm";
                     }
                 }
             } else {
@@ -330,11 +394,48 @@
                 isPhase4Locked = false;
                 endingFadeAlpha = 255;
                 
-                if (currentDistA <= THRESHOLD_DISTANCE && currentDistB <= THRESHOLD_DISTANCE) {
+                // ----------------------------------------------------------------------
+                // 🔬 [레디 잠금 패치]: PLAYER A (우측 진영) 1초 검증 및 락 메커니즘
+                // ----------------------------------------------------------------------
+                if (currentDistA <= START_DISTANCE) {
+                    if (!isReadyLockedA) {
+                        if (readyTimerA === 0) {
+                            readyTimerA = millis(); // 150cm 안으로 들어온 최초 프레임 순간 시간 포착
+                        } else if (millis() - readyTimerA >= 1000) {
+                            isReadyLockedA = true; // 1초(1000ms) 연속 유지 달성 시 영구 잠금 활성화
+                        }
+                    }
+                } else {
+                    // 1초를 채우지 못하고 나간 경우에만 타이머를 초기화 (잘못 스친 신호 필터링)
+                    if (!isReadyLockedA) readyTimerA = 0; 
+                }
+
+                // ----------------------------------------------------------------------
+                // 🔬 [레디 잠금 패치]: PLAYER B (좌측 진영) 1초 검증 및 락 메커니즘
+                // ----------------------------------------------------------------------
+                if (currentDistB <= START_DISTANCE) {
+                    if (!isReadyLockedB) {
+                        if (readyTimerB === 0) {
+                            readyTimerB = millis();
+                        } else if (millis() - readyTimerB >= 1000) {
+                            isReadyLockedB = true;
+                        }
+                    }
+                } else {
+                    if (!isReadyLockedB) readyTimerB = 0;
+                }
+
+                // [가상 고정 가드]: 1초 락이 획득된 상태라면, 실제 거리값이 튀더라도 가상 수치(150cm)로 위계 고정
+                let finalDistA = isReadyLockedA ? min(currentDistA, START_DISTANCE) : currentDistA;
+                let finalDistB = isReadyLockedB ? min(currentDistB, START_DISTANCE) : currentDistB;
+
+
+                // --- 가상 고정 수치(finalDistA/B)를 기반으로 Phase 판정 위계 재정렬 ---
+                if (finalDistA <= THRESHOLD_DISTANCE && finalDistB <= THRESHOLD_DISTANCE) {
                     currentPhase = 3;
                     isPhase2TimelineStarted = false;
                 } 
-                else if (currentDistA <= START_DISTANCE && currentDistB <= START_DISTANCE) {
+                else if (finalDistA <= START_DISTANCE && finalDistB <= START_DISTANCE) {
                     currentPhase = 2; 
                     if (!isPhase2TimelineStarted) {
                         phase2StartTime = millis();
@@ -536,7 +637,7 @@
                 // [혼합 에러 박멸 패치]: 4단계 터치 중이더라도, 20초 아웃트로 소멸 시퀀스가 시작되면 이 하단부 렌더러는 가동을 영구 중지합니다.
                 let touchDuration = isTouchTriggered ? (millis() - touchStartTime) : 0;
                 
-                if (touchDuration < 20000) {
+                if (touchDuration < 10000) {
                     globalMembraneAlpha = 255; 
                     pg.push();
                     drawGiantMembrane(globalMembraneAlpha);
@@ -549,7 +650,7 @@
             // 🔬 비주얼 연출 파트 3: 마이크로 가리비 세포 입자 생성 및 철통 격리 유영
             // -------------------------------------------------------------
             let canStartParticles = false;
-            let isOutTimelineFreezing = (currentPhase === 4 && (millis() - touchStartTime) >= 21500);
+            let isOutTimelineFreezing = (currentPhase === 4 && (millis() - touchStartTime) >= 11500);
 
             if (currentPhase === 2) {
                 let timelineElapsed = millis() - phase2StartTime;
