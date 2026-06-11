@@ -1120,35 +1120,46 @@
         }
 
         // ==========================================================================
-        // 🔬 [하드웨어 인프라 교정]: 포트 격리 개방 및 병렬 수신 마스터 스크립트
+        // 🔬 [하드웨어 인프라 최종 개통]: 아두이노 고유 패킷(단어 2개) 전용 병렬 수신 엔진
         // ==========================================================================
-        let readerA, readerB; // 글로벌 독립 리더 변수 인프라 확보
+        let readerA, readerB; // 글로벌 독립 리더 변수 인프라 유지
 
-        // 데이터 해석 및 변수 매핑 공통 서브 루틴
+        // [정밀 동기화 허브]: 아두이노가 던지는 "식별자(A/B) + 숫자" 2단 데이터 파싱 서브 루틴
         function parseSerialLine(line) {
             let trimmed = line.trim();
             if (trimmed.length > 0) {
                 let data = trimmed.split(" ");
-                if (data.length === 3) {
-                    let idHeader = data[0];
-                    let readingVal = Number(data[1]);
-                    let isTouchOn = Number(data[2]);
+                
+                // 승민 님이 픽스하신 아두이노 프로토콜 위계 (구분자 + 수치 -> 총 2개 단어)
+                if (data.length === 2) {
+                    let idHeader = data[0];         // 'A' 또는 'B' 식별자
+                    let incomingNum = Number(data[1]); // 들어온 숫자 (10이면 터치, 그 외는 거리)
 
-                    // 플레이어 A 실시간 데이터 물리 매핑
+                    // --- [PLAYER A 진영] 실시간 물리 데이터 매핑 ---
                     if (idHeader === 'A' || idHeader === 'a') {
-                        if (isTouchOn === 1) { isTouchA = true; currentDistA = 0; } 
-                        else { isTouchA = false; currentDistA = readingVal; }
+                        if (incomingNum === 10) {
+                            isTouchA = true;
+                            currentDistA = 0; // 터치 순간 거리를 0으로 강제 압착하여 논리 모순 방지
+                        } else {
+                            isTouchA = false;
+                            currentDistA = incomingNum; // 순정 실시간 초음파 거리값 대입
+                        }
                     }
-                    // 플레이어 B 실시간 데이터 물리 매핑
+                    // --- [PLAYER B 진영] 실시간 물리 데이터 매핑 ---
                     else if (idHeader === 'B' || idHeader === 'b') {
-                        if (isTouchOn === 1) { isTouchB = true; currentDistB = 0; } 
-                        else { isTouchB = false; currentDistB = readingVal; }
+                        if (incomingNum === 10) {
+                            isTouchB = true;
+                            currentDistB = 0; // 터치 순간 거리 압착
+                        } else {
+                            isTouchB = false;
+                            currentDistB = incomingNum;
+                        }
                     }
                 }
             }
         }
 
-        // --- [CHANNEL A]: 플레이어 A 아두이노 독점 개통 함수 ---
+        // --- [CHANNEL A]: 플레이어 A 아두이노 포트 독점 개통 함수 ---
         async function connectSerialA() {
             try {
                 const portA = await navigator.serial.requestPort();
@@ -1158,14 +1169,14 @@
                 portA.readable.pipeTo(decoderA.writable);
                 readerA = decoderA.readable.getReader();
 
-                // 연결 성공 시 해당 버튼 비활성화 마감 처리
+                // 페어링 성공 시 UI 인터랙션 락
                 const btnA = document.getElementById('connect-btn-a');
                 btnA.innerText = "PLAYER A CONNECTED";
                 btnA.style.backgroundColor = "#555";
                 btnA.style.color = "#aaa";
                 btnA.style.pointerEvents = "none";
 
-                checkAllHardwareConnected(); // 전체 연결 상태 점검 후 UI 마감
+                checkAllHardwareConnected(); // 전체 마감 점검
 
                 // 독립 비동기 백그라운드 스트림 루프 가동
                 (async () => {
@@ -1186,7 +1197,7 @@
             }
         }
 
-        // --- [CHANNEL B]: 플레이어 B 아두이노 독점 개통 함수 ---
+        // --- [CHANNEL B]: 플레이어 B 아두이노 포트 독점 개통 함수 ---
         async function connectSerialB() {
             try {
                 const portB = await navigator.serial.requestPort();
@@ -1222,12 +1233,11 @@
             }
         }
 
-        // 양방향 하드웨어가 모두 페어링 완료되었을 때 UI 박스를 일괄 정리하는 가드 함수
+        // 양방향 하드웨어가 모두 페어링 완료되었을 때 상단 UI 박스를 일괄 정리하는 가드 함수
         function checkAllHardwareConnected() {
             const btnA = document.getElementById('connect-btn-a');
             const btnB = document.getElementById('connect-btn-b');
             
-            // 두 버튼이 모두 연결 상태로 스위칭되었을 때 전체 컨테이너를 숨김
             if (btnA.style.pointerEvents === "none" && btnB.style.pointerEvents === "none") {
                 const group = document.getElementById('serial-connect-group');
                 if (group) group.style.display = 'none';
