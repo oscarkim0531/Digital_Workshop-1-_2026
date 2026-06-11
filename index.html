@@ -9,7 +9,10 @@
 </head>
 <body>
 
-    <button id="connect-btn">Connect System</button>
+    <div id="serial-connect-group" style="position: absolute; top: 20px; left: 20px; z-index: 999; display: flex; gap: 10px;">
+        <button id="connect-btn-a" style="padding: 10px 15px; background-color: #D500F9; color: black; border: none; font-weight: 700; cursor: pointer; border-radius: 4px;">Connect PLAYER A (우측)</button>
+        <button id="connect-btn-b" style="padding: 10px 15px; background-color: #D0EE17; color: black; border: none; font-weight: 700; cursor: pointer; border-radius: 4px;">Connect PLAYER B (좌측)</button>
+    </div>
 
     <div id="debug-controller">
         <div class="control-group" style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; margin-bottom: 12px;">
@@ -99,7 +102,9 @@
                 createVector(-200, 350)   
             ];
 
-            document.getElementById('connect-btn').addEventListener('click', connectSerial);
+            // 🎯 [인프라 패치]: 독립된 사용자 클릭 이벤트를 확보하여 포트 연결 권한 100% 획득
+            document.getElementById('connect-btn-a').addEventListener('click', connectSerialA);
+            document.getElementById('connect-btn-b').addEventListener('click', connectSerialB);
             setupDebugUI();
         }
 
@@ -1115,98 +1120,117 @@
         }
 
         // ==========================================================================
-        // 🔬 [하드웨어 인프라 교정]: 2개 아두이노 포트 동시 페어링 및 병렬 파싱 엔진
+        // 🔬 [하드웨어 인프라 교정]: 포트 격리 개방 및 병렬 수신 마스터 스크립트
         // ==========================================================================
-        async function connectSerial() {
-            try {
-                // ------------------------------------------------------------------
-                // [PORT 1]: 첫 번째 아두이노 보드 페어링 개통 (예: PLAYER A)
-                // ------------------------------------------------------------------
-                alert("첫 번째 아두이노 보드(PLAYER A)를 선택해 주세요.");
-                const port1 = await navigator.serial.requestPort();
-                await port1.open({ baudRate: 9600 });
-                
-                const decoder1 = new TextDecoderStream();
-                port1.readable.pipeTo(decoder1.writable);
-                const reader1 = decoder1.readable.getReader();
+        let readerA, readerB; // 글로벌 독립 리더 변수 인프라 확보
 
-                // ------------------------------------------------------------------
-                // [PORT 2]: 두 번째 아두이노 보드 페어링 개통 (예: PLAYER B)
-                // ------------------------------------------------------------------
-                alert("이어서 두 번째 아두이노 보드(PLAYER B)를 선택해 주세요.");
-                const port2 = await navigator.serial.requestPort();
-                await port2.open({ baudRate: 9600 });
-                
-                const decoder2 = new TextDecoderStream();
-                port2.readable.pipeTo(decoder2.writable);
-                const reader2 = decoder2.readable.getReader();
+        // 데이터 해석 및 변수 매핑 공통 서브 루틴
+        function parseSerialLine(line) {
+            let trimmed = line.trim();
+            if (trimmed.length > 0) {
+                let data = trimmed.split(" ");
+                if (data.length === 3) {
+                    let idHeader = data[0];
+                    let readingVal = Number(data[1]);
+                    let isTouchOn = Number(data[2]);
 
-                // 두 보드가 무사히 개통되면 화면에서 커넥트 버튼을 깔끔하게 숨김 처리
-                document.getElementById('connect-btn').style.display = 'none';
-                alert("모든 하드웨어 시스템이 무결점으로 동기화되었습니다! 전시를 시작합니다.");
-
-                // ------------------------------------------------------------------
-                // [병렬 수신 코어]: 데이터 분석 및 변수 매핑 처리 함수 (내부 가드 서브 루틴)
-                // ------------------------------------------------------------------
-                function parseSerialLine(line) {
-                    let trimmed = line.trim();
-                    if (trimmed.length > 0) {
-                        let data = trimmed.split(" ");
-                        if (data.length === 3) {
-                            let idHeader = data[0];
-                            let readingVal = Number(data[1]);
-                            let isTouchOn = Number(data[2]);
-
-                            // 관객 A 진영 데이터 실시간 매핑
-                            if (idHeader === 'A' || idHeader === 'a') {
-                                if (isTouchOn === 1) { isTouchA = true; currentDistA = 0; } 
-                                else { isTouchA = false; currentDistA = readingVal; }
-                            }
-                            // 관객 B 진영 데이터 실시간 매핑
-                            else if (idHeader === 'B' || idHeader === 'b') {
-                                if (isTouchOn === 1) { isTouchB = true; currentDistB = 0; } 
-                                else { isTouchB = false; currentDistB = readingVal; }
-                            }
-                        }
+                    // 플레이어 A 실시간 데이터 물리 매핑
+                    if (idHeader === 'A' || idHeader === 'a') {
+                        if (isTouchOn === 1) { isTouchA = true; currentDistA = 0; } 
+                        else { isTouchA = false; currentDistA = readingVal; }
+                    }
+                    // 플레이어 B 실시간 데이터 물리 매핑
+                    else if (idHeader === 'B' || idHeader === 'b') {
+                        if (isTouchOn === 1) { isTouchB = true; currentDistB = 0; } 
+                        else { isTouchB = false; currentDistB = readingVal; }
                     }
                 }
+            }
+        }
 
-                // ------------------------------------------------------------------
-                // [독립 비동기 루프]: 포트 1번과 2번의 데이터를 실시간으로 가로채는 독립 스레드 가동
-                // ------------------------------------------------------------------
-                // 아두이노 A(1번) 비동기 스트림 감시 루프
+        // --- [CHANNEL A]: 플레이어 A 아두이노 독점 개통 함수 ---
+        async function connectSerialA() {
+            try {
+                const portA = await navigator.serial.requestPort();
+                await portA.open({ baudRate: 9600 });
+                
+                const decoderA = new TextDecoderStream();
+                portA.readable.pipeTo(decoderA.writable);
+                readerA = decoderA.readable.getReader();
+
+                // 연결 성공 시 해당 버튼 비활성화 마감 처리
+                const btnA = document.getElementById('connect-btn-a');
+                btnA.innerText = "PLAYER A CONNECTED";
+                btnA.style.backgroundColor = "#555";
+                btnA.style.color = "#aaa";
+                btnA.style.pointerEvents = "none";
+
+                checkAllHardwareConnected(); // 전체 연결 상태 점검 후 UI 마감
+
+                // 독립 비동기 백그라운드 스트림 루프 가동
                 (async () => {
-                    let buffer1 = "";
+                    let bufferA = "";
                     while (true) {
-                        const { value, done } = await reader1.read();
+                        const { value, done } = await readerA.read();
                         if (done) break;
                         if (value) {
-                            buffer1 += value;
-                            let lines = buffer1.split("\n");
-                            buffer1 = lines.pop();
+                            bufferA += value;
+                            let lines = bufferA.split("\n");
+                            bufferA = lines.pop();
                             for (let line of lines) { parseSerialLine(line); }
                         }
                     }
                 })();
-
-                // 아두이노 B(2번) 비동기 스트림 감시 루프
-                (async () => {
-                    let buffer2 = "";
-                    while (true) {
-                        const { value, done } = await reader2.read();
-                        if (done) break;
-                        if (value) {
-                            buffer2 += value;
-                            let lines = buffer2.split("\n");
-                            buffer2 = lines.pop();
-                            for (let line of lines) { parseSerialLine(line); }
-                        }
-                    }
-                })();
-
             } catch (error) {
-                console.error("다원 시리얼 포트 연동 실패:", error);
-                alert("연결이 취소되었거나 포트 개방에 실패했습니다. 다시 시도해 주세요.");
+                console.error("PLAYER A 포트 개방 실패:", error);
+            }
+        }
+
+        // --- [CHANNEL B]: 플레이어 B 아두이노 독점 개통 함수 ---
+        async function connectSerialB() {
+            try {
+                const portB = await navigator.serial.requestPort();
+                await portB.open({ baudRate: 9600 });
+                
+                const decoderB = new TextDecoderStream();
+                portB.readable.pipeTo(decoderB.writable);
+                readerB = decoderB.readable.getReader();
+
+                const btnB = document.getElementById('connect-btn-b');
+                btnB.innerText = "PLAYER B CONNECTED";
+                btnB.style.backgroundColor = "#555";
+                btnB.style.color = "#aaa";
+                btnB.style.pointerEvents = "none";
+
+                checkAllHardwareConnected();
+
+                (async () => {
+                    let bufferB = "";
+                    while (true) {
+                        const { value, done } = await readerB.read();
+                        if (done) break;
+                        if (value) {
+                            bufferB += value;
+                            let lines = bufferB.split("\n");
+                            bufferB = lines.pop();
+                            for (let line of lines) { parseSerialLine(line); }
+                        }
+                    }
+                })();
+            } catch (error) {
+                console.error("PLAYER B 포트 개방 실패:", error);
+            }
+        }
+
+        // 양방향 하드웨어가 모두 페어링 완료되었을 때 UI 박스를 일괄 정리하는 가드 함수
+        function checkAllHardwareConnected() {
+            const btnA = document.getElementById('connect-btn-a');
+            const btnB = document.getElementById('connect-btn-b');
+            
+            // 두 버튼이 모두 연결 상태로 스위칭되었을 때 전체 컨테이너를 숨김
+            if (btnA.style.pointerEvents === "none" && btnB.style.pointerEvents === "none") {
+                const group = document.getElementById('serial-connect-group');
+                if (group) group.style.display = 'none';
             }
         }
 
@@ -1297,24 +1321,20 @@
 
             // 2. L 키: 하드웨어 세팅 패널, 시리얼 버튼, 마우스 커서 일괄 숨김 토글
             if (key === 'L' || key === 'l') {
-                isShowUIMode = !isShowUIMode; // 상태 반전
+                isShowUIMode = !isShowUIMode; 
 
-                // HTML DOM 엘리먼트들을 실시간으로 추적하여 잡아옵니다.
-                const connectBtn = document.getElementById('connect-btn');
+                // [교정]: 새로 바뀐 통합 연결 버튼 그룹 박스를 실시간 추적
+                const connectGroup = document.getElementById('serial-connect-group');
                 const debugController = document.getElementById('debug-controller');
 
                 if (isShowUIMode) {
-                    // --- UI 보이기 상태 (연구/세팅 모드) ---
-                    cursor(); // [교정]: pg.을 제거하고 메인 캔버스 커서 복구 함수 호출
-                    
-                    if (connectBtn) connectBtn.style.display = 'block'; // 버튼 부활
-                    if (debugController) debugController.style.display = 'block'; // 패널 부활
+                    cursor(); 
+                    if (connectGroup) connectGroup.style.display = 'flex'; // 그룹 레이아웃 보이기
+                    if (debugController) debugController.style.display = 'block'; 
                 } else {
-                    // --- UI 숨기기 상태 (실전 PROJECTION 전시 모드) ---
-                    noCursor(); // [교정]: pg.을 제거하고 메인 캔버스 커서 투명화 함수 호출
-                    
-                    if (connectBtn) connectBtn.style.display = 'none'; // 버튼 멸실
-                    if (debugController) debugController.style.display = 'none'; // 패널 멸실
+                    noCursor(); 
+                    if (connectGroup) connectGroup.style.display = 'none';  // 실전 전시 모드 시 완전 멸실
+                    if (debugController) debugController.style.display = 'none'; 
                 }
             }
         }
